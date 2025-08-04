@@ -1,15 +1,21 @@
 
-# บอร์ดสั่งการสองภาษา (Bilingual Dashboard Board)
 
-แอปเว็บ React + Vite สำหรับจัดการบอร์ดสั่งการ รองรับภาษาไทยและอังกฤษ
+# POS TOGO Dashboard (บอร์ดสั่งการ/OrderPad สองภาษา)
+
+เว็บแอป React + Vite สำหรับจัดการออเดอร์และบอร์ด รองรับภาษาไทยและอังกฤษ (Bilingual)
 
 ## ฟีเจอร์หลัก
-- หน้า Dashboard มีส่วนหัวชื่อ "บอร์ดสั่งการของคุณ" และปุ่มตั้งค่า (⚙️)
-- แสดงรายการบอร์ดแบบการ์ดแนวนอน (เลื่อนซ้าย-ขวา)
-- ตัวอย่างบอร์ด: บริษัท 🏢, ตลาด 🛒, ซ่อมแซม 🛠️, และปุ่มเพิ่มบอร์ดใหม่
-- รองรับการเปลี่ยนภาษา (i18n) [เตรียมโครงสร้างไว้]
+- หน้าแรกเป็น OrderPad: แสดงรายการออเดอร์แบบ Draft และ History (ส่งแล้ว)
+- เพิ่ม/แก้ไข/ลบออเดอร์ (NewOrder)
+- ดูรายละเอียดออเดอร์ (OrderDetailModal)
+- ระบบบันทึกข้อมูลออเดอร์ใน localStorage (ไม่ต้องมี backend)
+- ระบบ autocomplete รายการสินค้าและซัพพลายเออร์
+- แนบรูปภาพสินค้าในออเดอร์ได้
+- คัดลอกข้อความออเดอร์, สั่งพิมพ์, บันทึก draft, ส่งออเดอร์
+- Responsive UI, ใช้งานได้ทั้งมือถือและเดสก์ท็อป
+- เตรียมโครงสร้างรองรับ i18n (ไทย/อังกฤษ)
 
-## วิธีเริ่มต้น
+## วิธีเริ่มต้นใช้งาน
 1. ติดตั้ง dependencies:
    ```sh
    npm install
@@ -18,13 +24,14 @@
    ```sh
    npm run dev
    ```
-3. เปิดเบราว์เซอร์ที่แสดง URL ที่แสดงในเทอร์มินัล
+3. เปิดเบราว์เซอร์ที่ URL ที่แสดงในเทอร์มินัล (ปกติ http://localhost:5173 หรือ 5174)
 
 ## โครงสร้างไฟล์หลัก
-- `src/components/Header.jsx` ส่วนหัวและปุ่มตั้งค่า
-- `src/components/BoardList.jsx` รายการบอร์ดแนวนอน
-- `src/Dashboard.jsx` หน้า Dashboard หลัก
-- `src/App.jsx` จุดเริ่มต้นของแอป
+- `src/App.jsx` จุดเริ่มต้นของแอปและควบคุมการเปลี่ยนหน้า (OrderPad/NewOrder)
+- `src/OrderPad.jsx` หน้าแสดงรายการออเดอร์ (Draft/History)
+- `src/NewOrder.jsx` หน้าเพิ่ม/แก้ไขออเดอร์
+- `src/components/OrderDetailModal.jsx` ดูรายละเอียดออเดอร์
+- `src/components/Header.jsx`, `BoardList.jsx`, `SettingsModal.jsx` ฯลฯ สำหรับ Dashboard
 
 ---
-สร้างด้วย React + Vite
+สร้างด้วย React + Vite | Responsive | i18n-ready | LocalStorage only

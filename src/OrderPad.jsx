@@ -11,6 +11,49 @@ function loadOrders() {
 }
 
 export default function OrderPad({ onNewOrder, onEditOrder }) {
+  // Responsive CSS for mobile
+  const responsiveStyle = `
+    @media (max-width: 600px) {
+      html, body {
+        background: #fff !important;
+      }
+      .orderpad-main {
+        padding: 0 !important;
+        max-width: 90vw !important;
+        min-height: 90vh !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        width: 90vw !important;
+      }
+      .orderpad-main h1 {
+        font-size: 20px !important;
+      }
+      .orderpad-main h2 {
+        font-size: 16px !important;
+      }
+      .orderpad-main input,
+      .orderpad-main select,
+      .orderpad-main textarea {
+        font-size: 15px !important;
+        padding: 8px 6px !important;
+      }
+      .orderpad-main button {
+        font-size: 15px !important;
+        padding: 8px 10px !important;
+        min-width: 60px !important;
+      }
+      .orderpad-main ul {
+        padding-left: 10px !important;
+      }
+      .orderpad-main label {
+        font-size: 14px !important;
+      }
+      .orderpad-main section {
+        margin-bottom: 18px !important;
+      }
+    }
+  `;
   const [orders, setOrders] = useState([]);
   const [viewOrder, setViewOrder] = useState(null); // for viewing history detail
 
@@ -23,13 +66,15 @@ export default function OrderPad({ onNewOrder, onEditOrder }) {
   const history = orders.filter(o => o.status === 'SENT');
 
   return (
-    <div className="orderpad-main" style={{ maxWidth: 700, width: '100vw', minHeight: '100vh', margin: '0 auto', background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px #0002', padding: 32, boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
-        <h1 style={{ color: '#1976d2', fontWeight: 700, fontSize: 32, margin: 0 }}>OrderPad</h1>
-        <button onClick={onNewOrder} style={{ background: '#1976d2', color: '#fff', fontWeight: 700, fontSize: 20, border: 'none', borderRadius: 8, padding: '12px 32px', cursor: 'pointer', boxShadow: '0 2px 8px #0001' }}>+ New Order</button>
-      </div>
+    <>
+      <style>{responsiveStyle}</style>
+      <div className="orderpad-main" style={{ maxWidth: 700, width: '100vw', minHeight: '100vh', margin: '0 auto', background: '#fff', borderRadius: 14, boxShadow: '0 4px 24px #0002', padding: 32, boxSizing: 'border-box' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
+          <h1 style={{ color: '#1976d2', fontWeight: 700, fontSize: 32, margin: 0 }}>OrderPad</h1>
+          <button onClick={onNewOrder} style={{ background: '#1976d2', color: '#fff', fontWeight: 700, fontSize: 20, border: 'none', borderRadius: 8, padding: '12px 32px', cursor: 'pointer', boxShadow: '0 2px 8px #0001' }}>+ New Order</button>
+        </div>
 
-      <section style={{ marginBottom: 32 }}>
+        <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, color: '#222', marginBottom: 12 }}>Drafts</h2>
         {drafts.length === 0 ? (
           <div style={{ color: '#888', fontSize: 16, marginBottom: 16 }}>No drafts yet.</div>
@@ -74,6 +119,7 @@ export default function OrderPad({ onNewOrder, onEditOrder }) {
       {viewOrder && (
         <OrderDetailModal order={viewOrder} onClose={() => setViewOrder(null)} />
       )}
-    </div>
+      </div>
+    </>
   );
 }
