@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { loadPriceMap, savePriceMap, lineTotal, orderTotal, hasPrice, formatMoney, priceChangePct } from './orderStorage';
 
 
 const getToday = () => new Date().toISOString().slice(0, 10);
@@ -30,8 +31,14 @@ export default function NewOrder({ order, onBack }) {
   const [itemInput, setItemInput] = useState('');
   // Item autocomplete state
   // Fixed unit list as requested
-  const fixedUnitList = ["พาว", "ขวด", "ถุง", "ชิ้น", "อัน", "ก้อง", "แถว", "กระป๋อง"];
-  const [itemList, setItemList] = useState(fixedUnitList);
+  const fixedUnitList = ["ลัง", "พาว", "ขวด", "ถุง", "ชิ้น", "อัน", "ก้อง", "แถว", "กระป๋อง"];
+  const [itemList, setItemList] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('item_list') || '[]');
+    } catch {
+      return [];
+    }
+  });
   // Remember last used qty for each item
   const [itemQtyMap, setItemQtyMap] = useState(() => {
     try {
@@ -43,6 +50,9 @@ export default function NewOrder({ order, onBack }) {
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [itemInputRef, setItemInputRef] = useState(null);
   const [qtyInput, setQtyInput] = useState(1);
+  // Unit price as typed ('' = not entered); last paid price per item for autofill and change alerts
+  const [priceInput, setPriceInput] = useState('');
+  const [priceMap, setPriceMap] = useState(loadPriceMap);
   const [needCall, setNeedCall] = useState(false);
   const [editIdx, setEditIdx] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -63,11 +73,16 @@ export default function NewOrder({ order, onBack }) {
   // Add or edit item logic
   const handleAddOrEdit = () => {
     if (!itemInput.trim()) return;
+    const name = itemInput.trim();
+    const price = priceInput === '' ? '' : Math.max(0, Number(priceInput));
     const newItem = {
-      name: itemInput.trim(),
+      name,
       needCall,
       qty: qtyInput,
       unit,
+      price,
+      // Price paid last time, kept when editing so the change alert stays stable
+      prevPrice: editIdx !== null ? items[editIdx].prevPrice : priceMap[name],
     };
     if (editIdx !== null) {
       const updated = [...items];
@@ -89,8 +104,14 @@ export default function NewOrder({ order, onBack }) {
       setItemQtyMap(newMap);
       localStorage.setItem('item_qty_map', JSON.stringify(newMap));
     }
+    if (price !== '') {
+      const newPriceMap = { ...priceMap, [name]: price };
+      setPriceMap(newPriceMap);
+      savePriceMap(newPriceMap);
+    }
     setItemInput('');
     setQtyInput(1);
+    setPriceInput('');
     setNeedCall(false);
     setShowItemDropdown(false);
   };
@@ -215,6 +236,8 @@ export default function NewOrder({ order, onBack }) {
     setItemInput(items[idx].name);
     setQtyInput(items[idx].qty || 1);
     setNeedCall(items[idx].needCall);
+    if (items[idx].unit) setUnit(items[idx].unit);
+    setPriceInput(hasPrice(items[idx]) ? String(items[idx].price) : '');
   };
 
   const handleDelete = idx => {
@@ -225,6 +248,7 @@ export default function NewOrder({ order, onBack }) {
       setItemInput('');
       setQtyInput(1);
       setNeedCall(false);
+      setPriceInput('');
     }
   };
 
@@ -466,7 +490,7 @@ export default function NewOrder({ order, onBack }) {
                   setShowItemDropdown(true);
                 }}
                 onFocus={() => setShowItemDropdown(true)}
-                onBlur={e => {
+                onBlur={() => {
                   // Delay to allow click event on dropdown
                   setTimeout(() => setShowItemDropdown(false), 120);
                 }}
@@ -506,6 +530,7 @@ export default function NewOrder({ order, onBack }) {
                         setItemInput(i);
                         // Autofill qty if known
                         if (itemQtyMap[i] !== undefined) setQtyInput(itemQtyMap[i]);
+                        if (priceMap[i] !== undefined) setPriceInput(String(priceMap[i]));
                         setTimeout(() => setShowItemDropdown(false), 0);
                       }}
                     >
@@ -540,6 +565,19 @@ export default function NewOrder({ order, onBack }) {
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 14, color: '#1976d2' }}>
+              $
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={priceInput}
+                onChange={e => setPriceInput(e.target.value)}
+                placeholder="Price/unit"
+                style={{ width: 96, fontSize: 16, padding: 8, borderRadius: 6, border: '1px solid #1976d2', color: '#111', background: '#fff' }}
+              />
+            </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 14, marginBottom: 0, color: '#1976d2' }}>
               <input type="checkbox" checked={needCall} onChange={e => setNeedCall(e.target.checked)} />
               Need to call
@@ -547,16 +585,38 @@ export default function NewOrder({ order, onBack }) {
           </div>
         </div>
         <ul style={{ paddingLeft: 20, marginBottom: 24, color: '#111' }}>
-          {items.map((item, idx) => (
-            <li key={idx} style={{ marginBottom: 8, fontSize: 16, color: '#222', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {items.map((item, idx) => {
+            const change = priceChangePct(item);
+            return (
+            <li key={idx} style={{ marginBottom: 8, fontSize: 16, color: '#222', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <span>{item.name}</span>
               {item.needCall && <span style={{ color: '#d32f2f', fontWeight: 600, fontSize: 13, border: '1px solid #d32f2f', borderRadius: 4, padding: '1px 6px' }}>Need to call</span>}
               <span style={{ color: '#888', fontSize: 13 }}>Qty: {item.qty} {item.unit ? item.unit : ''}</span>
+              {hasPrice(item) && (
+                <span style={{ color: '#555', fontSize: 13 }}>@ {formatMoney(item.price)} = <b>{formatMoney(lineTotal(item))}</b></span>
+              )}
+              {change !== null && Math.abs(change) >= 0.5 && (
+                <span
+                  title={`Last price: ${formatMoney(item.prevPrice)}`}
+                  style={{ fontSize: 12, fontWeight: 700, borderRadius: 4, padding: '1px 6px', color: change > 0 ? '#d32f2f' : '#388e3c', border: `1px solid ${change > 0 ? '#d32f2f' : '#388e3c'}` }}
+                >
+                  {change > 0 ? '▲' : '▼'} {Math.abs(change).toFixed(0)}% vs last
+                </span>
+              )}
               <button onClick={() => handleEdit(idx)} style={{ marginLeft: 8, fontSize: 14, background: '#eee', border: 'none', borderRadius: 4, padding: '2px 10px', cursor: 'pointer' }}>Edit</button>
               <button onClick={() => handleDelete(idx)} style={{ fontSize: 14, background: '#ffd6d6', border: 'none', borderRadius: 4, padding: '2px 10px', cursor: 'pointer', color: '#d32f2f' }}>Delete</button>
             </li>
-          ))}
+            );
+          })}
         </ul>
+        {items.some(hasPrice) && (
+          <div style={{ marginTop: -12, marginBottom: 24, fontSize: 18, fontWeight: 700, color: '#222', textAlign: 'right' }}>
+            Total: {formatMoney(orderTotal({ items }))}
+            {items.some(i => !hasPrice(i)) && (
+              <div style={{ fontSize: 13, fontWeight: 400, color: '#bfa100' }}>Some items have no price yet</div>
+            )}
+          </div>
+        )}
         <div style={{ marginBottom: 18, position: 'relative', color: '#111' }}>
           <label style={{ fontWeight: 600, display: 'block', marginBottom: 6, color: '#1976d2' }}>Order Message</label>
           <textarea value={orderMsg} readOnly rows={Math.max(5, orderMsg.split('\n').length)} style={{ width: '100%', fontSize: 15, padding: 10, borderRadius: 6, border: '1px solid #1976d2', background: '#fff', color: '#111', resize: 'vertical' }} />

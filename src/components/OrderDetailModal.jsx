@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasPrice, lineTotal, orderTotal, formatMoney } from '../orderStorage';
 
 export default function OrderDetailModal({ order, onClose }) {
   if (!order) return null;
@@ -18,7 +19,9 @@ export default function OrderDetailModal({ order, onClose }) {
           <ul style={{ paddingLeft: 20, color: '#222' }}>
             {order.items && order.items.length > 0 ? order.items.map((item, idx) => (
               <li key={idx} style={{ marginBottom: 6, color: '#222' }}>
-                <span style={{ fontWeight: 600 }}>{item.name}</span> x{item.qty} {item.needCall && <span style={{ color: '#d32f2f', fontWeight: 600, fontSize: 13, border: '1px solid #d32f2f', borderRadius: 4, padding: '1px 6px', marginLeft: 4 }}>Need to call</span>}
+                <span style={{ fontWeight: 600 }}>{item.name}</span> x{item.qty} {item.unit || ''}
+                {hasPrice(item) && <span style={{ color: '#555' }}> @ {formatMoney(item.price)} = {formatMoney(lineTotal(item))}</span>}
+                {' '}{item.needCall && <span style={{ color: '#d32f2f', fontWeight: 600, fontSize: 13, border: '1px solid #d32f2f', borderRadius: 4, padding: '1px 6px', marginLeft: 4 }}>Need to call</span>}
                 {item.image && item.image.previewUrl && (
                   <img src={item.image.previewUrl} alt="item" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4, marginLeft: 8, verticalAlign: 'middle' }} />
                 )}
@@ -26,6 +29,9 @@ export default function OrderDetailModal({ order, onClose }) {
             )) : <li style={{ color: '#bbb' }}>No items</li>}
           </ul>
         </div>
+        {orderTotal(order) > 0 && (
+          <div style={{ fontWeight: 700, fontSize: 18, color: '#222' }}>Total: {formatMoney(orderTotal(order))}</div>
+        )}
       </div>
     </div>
   );
