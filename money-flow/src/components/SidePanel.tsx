@@ -12,6 +12,7 @@ import {
 } from '../lib/aggregate';
 import type { Aliases, Transaction } from '../lib/types';
 import { money } from '../format';
+import { useT } from '../i18n';
 import type { Selection } from './GraphView';
 
 interface Props {
@@ -30,6 +31,14 @@ type Tab = 'overview' | 'monthly' | 'recurring' | 'duplicates' | 'names';
 export default function SidePanel(props: Props) {
   const [tab, setTab] = useState<Tab>('overview');
   const { selection } = props;
+  const t = useT();
+  const tabLabel: Record<Tab, string> = {
+    overview: t('tabOverview'),
+    monthly: t('tabMonthly'),
+    recurring: t('tabRecurring'),
+    duplicates: t('tabDuplicates'),
+    names: t('tabNames'),
+  };
   return (
     <aside className="panel">
       {selection ? (
@@ -37,9 +46,9 @@ export default function SidePanel(props: Props) {
       ) : (
         <>
           <nav className="tabs">
-            {(['overview', 'monthly', 'recurring', 'duplicates', 'names'] as Tab[]).map((t) => (
-              <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-                {t[0].toUpperCase() + t.slice(1)}
+            {(['overview', 'monthly', 'recurring', 'duplicates', 'names'] as Tab[]).map((k) => (
+              <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+                {tabLabel[k]}
               </button>
             ))}
           </nav>
@@ -59,6 +68,7 @@ export default function SidePanel(props: Props) {
 const nodeOf = (name: string): Selection => ({ kind: 'node', id: `cp:${name}` });
 
 function Overview({ txns, aliases, onSelect }: Props) {
+  const t = useT();
   const accts = useMemo(() => accountTotals(txns), [txns]);
   const topIn = useMemo(() => topCounterparties(txns, aliases, 'in', 10), [txns, aliases]);
   const topOut = useMemo(() => topCounterparties(txns, aliases, 'out', 10), [txns, aliases]);
@@ -66,23 +76,23 @@ function Overview({ txns, aliases, onSelect }: Props) {
   const maxIn = topIn[0]?.inflow ?? 1;
   return (
     <>
-      <h3>Accounts (raw — should match your statements)</h3>
+      <h3>{t('accountsRaw')}</h3>
       <table>
         <thead>
           <tr>
-            <th>Account</th>
-            <th className="num">In</th>
-            <th className="num">Out</th>
-            <th className="num">Net</th>
+            <th>{t('account')}</th>
+            <th className="num">{t('in')}</th>
+            <th className="num">{t('out')}</th>
+            <th className="num">{t('net')}</th>
           </tr>
         </thead>
         <tbody>
           {accts.map((a) => (
-            <tr key={a.account} title={`${a.count} txns · ${a.first} → ${a.last}`}>
+            <tr key={a.account} title={`${a.count} ${t('txns')} · ${a.first} → ${a.last}`}>
               <td>
                 {a.account}
                 <div className="muted small nowrap">
-                  {a.count} txns · {a.first.slice(5)} → {a.last.slice(5)}
+                  {a.count} {t('txns')} · {a.first.slice(5)} → {a.last.slice(5)}
                 </div>
               </td>
               <td className="num in">{money(a.inflow)}</td>
@@ -92,17 +102,18 @@ function Overview({ txns, aliases, onSelect }: Props) {
           ))}
         </tbody>
       </table>
-      <h3>Top money out</h3>
+      <h3>{t('topOut')}</h3>
       <BarList items={topOut.map((c) => ({ name: c.name, value: c.outflow, sub: `${c.countOut}×` }))} max={maxOut} cls="out" onPick={(n) => onSelect(nodeOf(n))} />
-      <h3>Top money in</h3>
+      <h3>{t('topIn')}</h3>
       <BarList items={topIn.map((c) => ({ name: c.name, value: c.inflow, sub: `${c.countIn}×` }))} max={maxIn} cls="in" onPick={(n) => onSelect(nodeOf(n))} />
-      <p className="muted small">Transfers between your own accounts are excluded from the top lists.</p>
+      <p className="muted small">{t('transfersExcluded')}</p>
     </>
   );
 }
 
 function BarList({ items, max, cls, onPick }: { items: { name: string; value: number; sub: string }[]; max: number; cls: string; onPick: (n: string) => void }) {
-  if (!items.length) return <p className="muted">Nothing in this range.</p>;
+  const t = useT();
+  if (!items.length) return <p className="muted">{t('nothing')}</p>;
   return (
     <ul className="bars">
       {items.map((i) => (
@@ -123,20 +134,21 @@ function BarList({ items, max, cls, onPick }: { items: { name: string; value: nu
 }
 
 function Monthly({ txns, aliases }: Props) {
+  const t = useT();
   const rows = useMemo(() => monthlyTotals(txns, aliases), [txns, aliases]);
   const max = Math.max(1, ...rows.map((r) => Math.max(r.inflow, r.outflow)));
   return (
     <>
-      <h3>By month</h3>
+      <h3>{t('byMonth')}</h3>
       <table className="monthly">
         <thead>
           <tr>
-            <th>Month</th>
-            <th className="num">In</th>
-            <th className="num">Out</th>
-            <th className="num">Net</th>
-            <th className="num" title="Moved between your own accounts (counted once)">
-              Transfers
+            <th>{t('month')}</th>
+            <th className="num">{t('in')}</th>
+            <th className="num">{t('out')}</th>
+            <th className="num">{t('net')}</th>
+            <th className="num" title={t('transfersTitle')}>
+              {t('transfers')}
             </th>
           </tr>
         </thead>
@@ -159,13 +171,14 @@ function Monthly({ txns, aliases }: Props) {
         </tbody>
       </table>
       <p className="muted small">
-        In/Out exclude transfers between your accounts once you've renamed those transfer nodes to the account name (see Names tab).
+        {t('monthlyNote')}
       </p>
     </>
   );
 }
 
 function Recurring({ txns, aliases, onSelect }: Props) {
+  const t = useT();
   const rows = useMemo(() => detectRecurring(txns, aliases), [txns, aliases]);
   const outs = rows.filter((r) => r.direction === 'out');
   const ins = rows.filter((r) => r.direction === 'in');
@@ -174,11 +187,10 @@ function Recurring({ txns, aliases, onSelect }: Props) {
     <table>
       <thead>
         <tr>
-          <th>Who</th>
-          <th>Every</th>
-          <th className="num">Typical</th>
-          <th className="num">Per year</th>
-          <th>Next</th>
+          <th>{t('who')}</th>
+          <th>{t('every')}</th>
+          <th className="num">{t('typical')}</th>
+          <th className="num">{t('perYear')}</th>
         </tr>
       </thead>
       <tbody>
@@ -187,13 +199,12 @@ function Recurring({ txns, aliases, onSelect }: Props) {
             <td>
               {r.counterparty}
               <div className="muted small">
-                {r.account} · {r.count}×{r.priceIncrease && <span className="warn"> · price up → {money(r.lastAmount)}</span>}
+                {r.account} · {r.count}× · {t('next')} {r.nextExpected}{r.priceIncrease && <span className="warn">{t('priceUp', { v: money(r.lastAmount) })}</span>}
               </div>
             </td>
-            <td>{r.frequency}</td>
+            <td>{t(r.frequency)}</td>
             <td className="num">{money(r.typicalAmount)}</td>
             <td className="num">{money(r.annualCost)}</td>
-            <td className="small">{r.nextExpected}</td>
           </tr>
         ))}
       </tbody>
@@ -201,39 +212,40 @@ function Recurring({ txns, aliases, onSelect }: Props) {
   );
   return (
     <>
-      <h3>Recurring charges</h3>
+      <h3>{t('recurringTitle')}</h3>
       {outs.length ? (
         <>
           <p>
-            <b>{outs.length}</b> recurring outflows ≈ <b className="out">{money(yearly)}</b> per year.
+            <b>{t('recurringSummary', { n: outs.length, v: money(yearly) })}</b>
           </p>
           {table(outs)}
         </>
       ) : (
-        <p className="muted">None found. Needs ≥3 regular charges (2 for yearly) with similar amounts.</p>
+        <p className="muted">{t('recurringNone')}</p>
       )}
       {ins.length > 0 && (
         <>
-          <h3>Recurring income</h3>
+          <h3>{t('recurringIncome')}</h3>
           {table(ins)}
         </>
       )}
-      <p className="muted small">Heuristic: regular spacing (weekly…yearly) and amounts within ±20%. Load 3+ months for best results.</p>
+      <p className="muted small">{t('recurringNote')}</p>
     </>
   );
 }
 
 function Duplicates({ txns, aliases }: Props) {
+  const t = useT();
   const groups = useMemo(() => findDuplicates(txns, aliases), [txns, aliases]);
-  if (!groups.length) return <p className="muted">No possible duplicates in this range.</p>;
+  if (!groups.length) return <p className="muted">{t('noDuplicates')}</p>;
   return (
     <>
-      <h3>Possible duplicates ({groups.length})</h3>
-      <p className="muted small">Same account, counterparty and amount on the same day (exact) or within 2 days (near). Verify before disputing.</p>
+      <h3>{t('duplicatesTitle', { n: groups.length })}</h3>
+      <p className="muted small">{t('duplicatesNote')}</p>
       {groups.map((g, i) => (
         <div key={i} className={`dup ${g.kind}`}>
           <div className="dup-head">
-            <span className="badge">{g.kind}</span> <b>{g.counterparty}</b> · {money(g.amount)} × {g.transactions.length}
+            <span className="badge">{t(g.kind)}</span> <b>{g.counterparty}</b> · {money(g.amount)} × {g.transactions.length}
             <div className="muted small">{g.account}</div>
           </div>
           <TxList txns={g.transactions} aliases={aliases} compact />
@@ -244,6 +256,7 @@ function Duplicates({ txns, aliases }: Props) {
 }
 
 function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props) {
+  const tr = useT();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   const [target, setTarget] = useState('');
@@ -266,25 +279,22 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
   };
   return (
     <>
-      <h3>Rename / merge counterparties</h3>
-      <p className="muted small">
-        Tick names that are the same party and merge them. To mark a transfer between your own accounts, merge it into the
-        <b> account name</b> (e.g. “TRANSFER SAV 7788” → “Savings”).
-      </p>
-      <input className="search" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <h3>{tr('namesTitle')}</h3>
+      <p className="muted small">{tr('namesNote')}</p>
+      <input className="search" placeholder={tr('search')} value={q} onChange={(e) => setQ(e.target.value)} />
       {picked.length > 0 && (
         <div className="merge-bar">
-          <span>{picked.length} selected → </span>
-          <input list="names-list" placeholder="New / existing name" value={target} onChange={(e) => setTarget(e.target.value)} />
+          <span>{tr('selected', { n: picked.length })}</span>
+          <input list="names-list" placeholder={tr('newName')} value={target} onChange={(e) => setTarget(e.target.value)} />
           <button className="primary" disabled={!target.trim()} onClick={merge}>
-            Merge
+            {tr('merge')}
           </button>
         </div>
       )}
       <datalist id="names-list">
         {accounts.map((a) => (
           <option key={`a-${a}`} value={a}>
-            (your account)
+            {tr('yourAccount')}
           </option>
         ))}
         {totals.map((c) => (
@@ -313,7 +323,7 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
               {raws.length > 0 && (
                 <div className="raws">
                   {raws.map((r) => (
-                    <span key={r} className="chip" title="Click to un-merge" onClick={() => onUnmerge(r)}>
+                    <span key={r} className="chip" title={tr('unmergeTitle')} onClick={() => onUnmerge(r)}>
                       {r} ✕
                     </span>
                   ))}
@@ -329,9 +339,10 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
 
 function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename, onUnmerge }: Props & { selection: Selection }) {
   const [newName, setNewName] = useState('');
+  const tr = useT();
   const back = (
     <button className="back" onClick={() => onSelect(null)}>
-      ← Back
+      {tr('back')}
     </button>
   );
   const byId = useMemo(() => new Map(txns.map((t) => [t.id, t])), [txns]);
@@ -348,7 +359,7 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
           {label(e.source)} → {label(e.target)}
         </h2>
         <p>
-          <b>{e.count}</b> transactions · <b>{money(e.total)}</b>
+          <b>{e.count}</b> {tr('transactions')} · <b>{money(e.total)}</b>
         </p>
         <TxList txns={list} aliases={aliases} />
       </div>
@@ -360,7 +371,7 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
     return (
       <div className="panel-body">
         {back}
-        <p className="muted">Not in the current view (check filters / Top N).</p>
+        <p className="muted">{tr('notInView')}</p>
       </div>
     );
   }
@@ -374,15 +385,15 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
       <h2>{node.label}</h2>
       <div className="kpis">
         <div>
-          <span className="muted small">{node.kind === 'account' ? 'Into account' : 'They received'}</span>
+          <span className="muted small">{node.kind === 'account' ? tr('intoAccount') : tr('theyReceived')}</span>
           <b className={node.kind === 'account' ? 'in' : 'out'}>{money(node.totalIn)}</b>
         </div>
         <div>
-          <span className="muted small">{node.kind === 'account' ? 'Out of account' : 'They sent you'}</span>
+          <span className="muted small">{node.kind === 'account' ? tr('outOfAccount') : tr('theySent')}</span>
           <b className={node.kind === 'account' ? 'out' : 'in'}>{money(node.totalOut)}</b>
         </div>
         <div>
-          <span className="muted small">Transactions</span>
+          <span className="muted small">{tr('transactions')}</span>
           <b>{list.length}</b>
         </div>
       </div>
@@ -390,11 +401,11 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
       {node.kind === 'counterparty' && (
         <>
           <div className="merge-bar">
-            <input list="rename-list" placeholder="Rename / merge into…" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <input list="rename-list" placeholder={tr('renamePh')} value={newName} onChange={(e) => setNewName(e.target.value)} />
             <datalist id="rename-list">
               {accounts.map((a) => (
                 <option key={a} value={a}>
-                  (your account — marks as transfer)
+                  {tr('yourAccountXfer')}
                 </option>
               ))}
               {graph.nodes
@@ -412,16 +423,16 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
                 setNewName('');
               }}
             >
-              Apply
+              {tr('apply')}
             </button>
           </div>
           {raws.some((r) => r !== node.label) && (
             <div className="raws">
-              <span className="muted small">Merged from: </span>
+              <span className="muted small">{tr('mergedFrom')}</span>
               {raws
                 .filter((r) => r !== node.label)
                 .map((r) => (
-                  <span key={r} className="chip" title="Click to un-merge" onClick={() => onUnmerge(r)}>
+                  <span key={r} className="chip" title={tr('unmergeTitle')} onClick={() => onUnmerge(r)}>
                     {r} ✕
                   </span>
                 ))}
@@ -430,7 +441,7 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
         </>
       )}
 
-      <h3>Connections</h3>
+      <h3>{tr('connections')}</h3>
       <ul className="conn">
         {incident
           .sort((a, b) => b.total - a.total)
@@ -449,8 +460,8 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
             );
           })}
       </ul>
-      {node.id === OTHER_NODE && <p className="muted small">Raise “Top N” in the filters to break this group out.</p>}
-      <h3>Transactions</h3>
+      {node.id === OTHER_NODE && <p className="muted small">{tr('otherHint')}</p>}
+      <h3>{tr('transactions')}</h3>
       <TxList txns={list} aliases={aliases} />
     </div>
   );
@@ -458,6 +469,7 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
 
 function TxList({ txns, aliases, compact }: { txns: Transaction[]; aliases: Aliases; compact?: boolean }) {
   const [limit, setLimit] = useState(100);
+  const tr = useT();
   const sorted = [...txns].sort((a, b) => b.date.localeCompare(a.date));
   return (
     <>
@@ -477,7 +489,7 @@ function TxList({ txns, aliases, compact }: { txns: Transaction[]; aliases: Alia
           ))}
         </tbody>
       </table>
-      {sorted.length > limit && <button onClick={() => setLimit((l) => l + 200)}>Show more ({sorted.length - limit})</button>}
+      {sorted.length > limit && <button onClick={() => setLimit((l) => l + 200)}>{tr('showMore', { n: sorted.length - limit })}</button>}
     </>
   );
 }

@@ -1,0 +1,132 @@
+import { useLang, useT } from '../i18n';
+
+const TH = [
+  {
+    h: '1. เตรียมไฟล์จากธนาคาร',
+    p: [
+      'ใช้ได้ทั้ง PDF statement และ CSV',
+      'Chase: เข้า chase.com → เลือกบัญชี → Statements → โหลด PDF ทีละเดือน หรือกดไอคอนดาวน์โหลด (ลูกศรลง) → เลือก Spreadsheet (CSV)',
+      'เก็บไฟล์ไว้ในโฟลเดอร์ money-flow\\data\\ (ไม่ขึ้น GitHub)',
+      'แนะนำให้โหลด 3 เดือนขึ้นไป จะเห็นรายจ่ายประจำชัดเจน',
+    ],
+  },
+  {
+    h: '2. นำไฟล์เข้า',
+    p: [
+      'กดปุ่มสีน้ำเงิน “+ เพิ่มไฟล์ CSV / PDF” หรือลากไฟล์มาวางในหน้านี้ เลือกหลายไฟล์พร้อมกันได้',
+      'จะมีหน้าต่างขึ้นมาทีละไฟล์ ถ้าเป็น PDF ให้ดูกล่องสีเขียว “✓ ยอดใน PDF ตรงกัน” แปลว่าอ่านครบถูกต้อง',
+      'ชื่อบัญชี: ใช้ชื่อเดิมทุกเดือน แอปจะรวมเป็นบัญชีเดียว ใส่ไฟล์เดิมซ้ำก็ไม่นับซ้ำ',
+      'ดูตารางตัวอย่าง: เงินออกต้องเป็นสีแดง ถ้ายอดซื้อเป็นสีเขียว (มักเป็นบัตรเครดิต) ให้ติ๊ก “กลับเครื่องหมาย”',
+      'กด “นำเข้า”',
+    ],
+  },
+  {
+    h: '3. อ่านกราฟ',
+    p: [
+      'กล่องสีน้ำเงิน = บัญชีของคุณ',
+      'วงกลมเขียว = คนหรือที่ที่ส่งเงินให้คุณ · แดง = ที่ที่คุณจ่ายเงินไป · ส้ม = มีทั้งรับและจ่าย',
+      'เส้นยิ่งหนา = เงินยิ่งเยอะ ตัวเลขบนเส้น “3 / $542” = 3 ครั้ง รวม $542',
+      'คลิกวงกลมหรือเส้นเพื่อดูรายการทั้งหมด คลิกที่ว่างเพื่อกลับ',
+      'ลากวงกลมย้ายได้ ใช้ล้อเมาส์ซูม กด “จัดกราฟใหม่” ถ้ารก',
+    ],
+  },
+  {
+    h: '4. แผงด้านขวา',
+    p: [
+      'ภาพรวม: ยอดเข้า/ออกของแต่ละบัญชี (ควรตรงกับ statement) และใครได้เงินจากคุณมากที่สุด',
+      'รายเดือน: เข้า-ออก-สุทธิ ทีละเดือน',
+      'จ่ายประจำ: subscription และค่าใช้จ่ายที่ตัดเป็นรอบ ประมาณว่าปีละเท่าไร และเตือนเมื่อราคาขึ้น',
+      'รายการซ้ำ: ยอดเท่ากัน ร้านเดียวกัน วันเดียวกัน อาจโดนตัดเงินซ้ำ',
+      'รวมชื่อ: ร้านเดียวกันแต่ชื่อต่างกัน ติ๊กแล้วกด “รวม”',
+    ],
+  },
+  {
+    h: '5. ถ้ามีหลายบัญชี',
+    p: [
+      'รายการโอนระหว่างบัญชีตัวเอง (เช่น “TRANSFER SAV 7788” หรือจ่ายบัตรเครดิต) ให้ไปแท็บ “รวมชื่อ” แล้วรวมเข้ากับชื่อบัญชีของคุณ',
+      'เส้นจะกลายเป็นสีม่วง และยอดรายเดือนจะไม่นับเงินโอนไปมาเป็นรายจ่าย',
+    ],
+  },
+  {
+    h: '6. ตัวกรองและส่งออก',
+    p: [
+      'แถบบน: เลือกช่วงวันที่ ยอดขั้นต่ำ เงินเข้า/ออก และเลือกบัญชีที่จะดู',
+      '“แสดงสูงสุด” = แสดงเฉพาะคู่ค้าที่ยอดสูงสุด N ราย ที่เหลือรวมเป็น OTHER',
+      '“บันทึกรูป” = รูปกราฟ PNG · “สรุป CSV” / “รายการ CSV” = เปิดใน Excel ได้',
+    ],
+  },
+  {
+    h: 'ความปลอดภัย',
+    p: [
+      'ข้อมูลไม่ออกจากเครื่อง แอปไม่ได้ส่งอะไรขึ้นเน็ต',
+      'ปิดแท็บแล้วรายการหายหมด ครั้งหน้าลากไฟล์ใส่ใหม่ (ชื่อที่รวมไว้ยังจำอยู่)',
+    ],
+  },
+];
+
+const EN = [
+  {
+    h: '1. Get files from your bank',
+    p: [
+      'PDF statements and CSV exports both work.',
+      'Chase: chase.com → account → Statements (PDF), or the download icon → Spreadsheet (CSV).',
+      'Keep them in money-flow/data/ (git-ignored). 3+ months gives the best results.',
+    ],
+  },
+  {
+    h: '2. Import',
+    p: [
+      'Click the blue “+ Add CSV / PDF” button or drop files on the page (several at once is fine).',
+      'For PDFs look for the green “✓ PDF reconciles” box.',
+      'Use the same account name every month so statements combine; re-importing a file never double-counts.',
+      'Money out must show red. If purchases are green (credit cards), tick “Flip sign”.',
+    ],
+  },
+  {
+    h: '3. Read the graph',
+    p: [
+      'Blue boxes = your accounts. Green circles send you money, red ones receive it, orange do both.',
+      'Thicker line = more money. “3 / $542” = 3 transactions totalling $542.',
+      'Click a circle or line to see its transactions; click empty space to go back.',
+    ],
+  },
+  {
+    h: '4. Side panel',
+    p: [
+      'Overview: per-account totals (should match statements) and top counterparties.',
+      'Monthly, Recurring (subscriptions + price increases), Duplicates (possible double charges), Names (merge names).',
+    ],
+  },
+  {
+    h: '5. Several accounts',
+    p: ['Merge transfer names (e.g. “TRANSFER SAV 7788”, card payments) into your account name in the Names tab. They turn purple and stop counting as spending.'],
+  },
+];
+
+export default function HelpDialog({ onClose }: { onClose: () => void }) {
+  const { lang } = useLang();
+  const t = useT();
+  const sections = lang === 'th' ? TH : EN;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal help" role="dialog" aria-label={t('help')} onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2>{t('openHelp')}</h2>
+          <button onClick={onClose}>{t('close')}</button>
+        </header>
+        <div className="help-body">
+          {sections.map((s) => (
+            <section key={s.h}>
+              <h3>{s.h}</h3>
+              <ul>
+                {s.p.map((x) => (
+                  <li key={x}>{x}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

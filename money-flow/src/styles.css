@@ -138,3 +138,10 @@ tr.clickable:hover { background: #f9fafb; }
 .pdf-check { border-radius: 8px; padding: 6px 10px; font-size: 13px; }
 .pdf-check.ok { background: #ecfdf5; color: #065f46; }
 .pdf-check.bad { background: #fffbeb; color: #92400e; }
+
+.empty-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.modal.help { width: min(720px, 100%); }
+.help-body { padding: 4px 18px 18px; line-height: 1.6; }
+.help-body h3 { color: var(--acct); font-size: 15px; text-transform: none; letter-spacing: 0; }
+.help-body ul { margin: 4px 0; padding-left: 20px; }
+.field-hint { font-size: 11px; color: var(--muted); }

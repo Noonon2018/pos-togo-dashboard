@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GraphView, { type GraphHandle, type Selection } from './components/GraphView';
 import ImportDialog, { type PendingFile } from './components/ImportDialog';
 import SidePanel from './components/SidePanel';
+import HelpDialog from './components/HelpDialog';
+import { useLang, useT } from './i18n';
 import { buildGraph, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
@@ -20,6 +22,9 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [status, setStatus] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const t = useT();
+  const { lang, setLang } = useLang();
   const graphRef = useRef<GraphHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -41,15 +46,15 @@ export default function App() {
     const read: PendingFile[] = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
     const problems: string[] = [];
     if (pdfs.length) {
-      setStatus(`Reading ${pdfs.length} PDF(s)…`);
+      setStatus(t('readingPdf', { n: pdfs.length }));
       const { pdfToLines } = await import('./lib/pdfText');
       for (const f of pdfs) {
         try {
           const pdf = parseStatementLines(await pdfToLines(await f.arrayBuffer()));
           if (pdf.parsed.rows.length) read.push({ name: f.name, text: '', pdf });
-          else problems.push(`${f.name}: no transactions found (scanned image PDF? — download CSV instead)`);
+          else problems.push(t('pdfNoTx', { f: f.name }));
         } catch (e) {
-          problems.push(`${f.name}: could not read PDF (${e instanceof Error ? e.message : 'error'})`);
+          problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
         }
       }
     }
@@ -57,9 +62,9 @@ export default function App() {
     read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
     if (problems.length) setStatus(problems.join(' · '));
-    else if (!read.length) setStatus('Unsupported file — use CSV or PDF statements.');
+    else if (!read.length) setStatus(t('unsupported'));
     else if (pdfs.length) setStatus('');
-  }, []);
+  }, [t]);
 
   const loadSamples = async () => {
     const entries = await Promise.all(
@@ -74,7 +79,7 @@ export default function App() {
       const ids = new Set(cur.map((t) => t.id));
       const fresh = newTx.filter((t) => !ids.has(t.id));
       const skipped = newTx.length - fresh.length;
-      setStatus(`Imported ${fresh.length} from ${file.name}${skipped ? ` · ${skipped} already loaded (skipped)` : ''}`);
+      setStatus(t('imported', { n: fresh.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
       return [...cur, ...fresh];
     });
     if (profile) setProfiles((ps) => [...ps.filter((p) => p.signature !== profile.signature && p.name !== profile.name), profile]);
@@ -93,7 +98,7 @@ export default function App() {
   };
 
   const clearAll = () => {
-    if (!confirm('Remove all loaded transactions from this tab? (Bank layouts and renames are kept.)')) return;
+    if (!confirm(t('confirmClear'))) return;
     setTxns([]);
     setSelection(null);
     setFilters(DEFAULT_FILTERS);
@@ -101,7 +106,7 @@ export default function App() {
   };
 
   const resetNames = () => {
-    if (confirm('Forget all renames/merges?')) setAliases({});
+    if (confirm(t('confirmResetNames'))) setAliases({});
   };
 
   return (
@@ -123,7 +128,11 @@ export default function App() {
       <header className="topbar">
         <h1>Money Flow</h1>
         <button className="primary" onClick={() => fileInput.current?.click()}>
-          + Add CSV / PDF
+          {t('addFile')}
+        </button>
+        <button onClick={() => setShowHelp(true)}>❓ {t('help')}</button>
+        <button className="lang" onClick={() => setLang(lang === 'th' ? 'en' : 'th')} title="ภาษา / Language">
+          🌐 {t('lang')}
         </button>
         <input
           ref={fileInput}
@@ -139,19 +148,19 @@ export default function App() {
         {txns.length > 0 && (
           <>
             <span className="muted small">
-              {txns.length} txns · {accounts.length} accounts · {graph.nodes.length} nodes
+              {t('stats', { t: txns.length, a: accounts.length, n: graph.nodes.length })}
             </span>
             <span className="spacer" />
-            <button onClick={() => graphRef.current?.fit()}>Fit</button>
-            <button onClick={() => graphRef.current?.relayout()}>Re-layout</button>
-            <button onClick={exportPng}>PNG</button>
-            <button onClick={() => download(`money-flow-summary-${stamp}.csv`, summaryCsv(filtered, aliases))}>Summary CSV</button>
-            <button onClick={() => download(`money-flow-transactions-${stamp}.csv`, transactionsCsv(filtered, aliases))}>Txns CSV</button>
-            <button onClick={resetNames} title="Forget all renames/merges">
-              Reset names
+            <button onClick={() => graphRef.current?.fit()}>{t('fit')}</button>
+            <button onClick={() => graphRef.current?.relayout()}>{t('relayout')}</button>
+            <button onClick={exportPng}>{t('png')}</button>
+            <button onClick={() => download(`money-flow-summary-${stamp}.csv`, summaryCsv(filtered, aliases))}>{t('summaryCsv')}</button>
+            <button onClick={() => download(`money-flow-transactions-${stamp}.csv`, transactionsCsv(filtered, aliases))}>{t('txnsCsv')}</button>
+            <button onClick={resetNames} title={t('resetNamesTitle')}>
+              {t('resetNames')}
             </button>
             <button className="danger" onClick={clearAll}>
-              Clear
+              {t('clear')}
             </button>
           </>
         )}
@@ -160,24 +169,24 @@ export default function App() {
       {txns.length > 0 && (
         <div className="filters">
           <label>
-            From <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />
+            {t('from')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />
           </label>
           <label>
-            To <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.to ?? ''} onChange={(e) => set({ to: e.target.value || undefined })} />
+            {t('to')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.to ?? ''} onChange={(e) => set({ to: e.target.value || undefined })} />
           </label>
           <label>
-            Min $ <input type="number" min={0} step={10} value={filters.minAmount || ''} placeholder="0" onChange={(e) => set({ minAmount: Number(e.target.value) || 0 })} />
+            {t('minAmt')} <input type="number" min={0} step={10} value={filters.minAmount || ''} placeholder="0" onChange={(e) => set({ minAmount: Number(e.target.value) || 0 })} />
           </label>
           <label>
-            Flow
+            {t('flow')}
             <select value={filters.direction} onChange={(e) => set({ direction: e.target.value as Filters['direction'] })}>
-              <option value="all">In &amp; out</option>
-              <option value="in">Money in only</option>
-              <option value="out">Money out only</option>
+              <option value="all">{t('flowAll')}</option>
+              <option value="in">{t('flowIn')}</option>
+              <option value="out">{t('flowOut')}</option>
             </select>
           </label>
-          <label title="Show only the N largest counterparties; the rest are grouped into OTHER (0 = show all)">
-            Top N <input type="number" min={0} step={5} value={filters.topN} onChange={(e) => set({ topN: Math.max(0, Number(e.target.value) || 0) })} />
+          <label title={t('topNTitle')}>
+            {t('topN')} <input type="number" min={0} step={5} value={filters.topN} onChange={(e) => set({ topN: Math.max(0, Number(e.target.value) || 0) })} />
           </label>
           <span className="acct-chips">
             {accounts.map((a) => {
@@ -199,7 +208,7 @@ export default function App() {
           </span>
           {(filters.from || filters.to || filters.minAmount || filters.direction !== 'all' || filters.accounts.length > 0) && (
             <button className="link" onClick={() => setFilters({ ...DEFAULT_FILTERS, topN: filters.topN })}>
-              reset filters
+              {t('resetFilters')}
             </button>
           )}
         </div>
@@ -214,17 +223,20 @@ export default function App() {
       {txns.length === 0 ? (
         <main className="empty">
           <div className="empty-card">
-            <h2>Map where your money goes</h2>
-            <p>
-              Drop bank / credit-card <b>CSV exports or PDF statements</b> here — several months at once is fine (or click <b>+ Add CSV / PDF</b>). Each file is one account; add several
-              to see transfers between your own accounts.
-            </p>
+            <h2>{t('emptyTitle')}</h2>
+            <p>{t('emptyBody')}</p>
+            <div className="empty-actions">
+              <button className="primary" onClick={() => fileInput.current?.click()}>
+                {t('addFile')}
+              </button>
+              <button onClick={() => setShowHelp(true)}>📖 {t('openHelp')}</button>
+              <button onClick={loadSamples}>{t('trySamples')}</button>
+            </div>
             <ul>
-              <li>Everything runs in this browser tab. Nothing is uploaded; the production build blocks all network requests.</li>
-              <li>Only column layouts and renames are saved in this browser. Transactions are gone when you close the tab.</li>
-              <li>Keep real statements in the <code>data/</code> folder (git-ignored).</li>
+              <li>{t('empty1')}</li>
+              <li>{t('empty2')}</li>
+              <li>{t('empty3')}</li>
             </ul>
-            <button onClick={loadSamples}>Try with anonymized sample files</button>
           </div>
         </main>
       ) : (
@@ -242,18 +254,18 @@ export default function App() {
           />
           <div className="legend">
             <span>
-              <i className="sw acct" /> your account
+              <i className="sw acct" /> {t('legAcct')}
             </span>
             <span>
-              <i className="sw in" /> money in
+              <i className="sw in" /> {t('legIn')}
             </span>
             <span>
-              <i className="sw out" /> money out
+              <i className="sw out" /> {t('legOut')}
             </span>
             <span>
-              <i className="sw xfer" /> own-account transfer
+              <i className="sw xfer" /> {t('legXfer')}
             </span>
-            <span className="muted">edge label = count / total</span>
+            <span className="muted">{t('legEdge')}</span>
           </div>
         </main>
       )}
@@ -269,6 +281,7 @@ export default function App() {
           onSkip={() => setQueue((q) => q.slice(1))}
         />
       )}
+      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { applyMapping, guessMapping, headerSignature, parseCsvText, type ParsedC
 import type { StatementResult } from '../lib/pdfStatement';
 import type { BankProfile, ColumnMapping, Transaction } from '../lib/types';
 import { money } from '../format';
+import { useT } from '../i18n';
 
 export interface PendingFile {
   name: string;
@@ -28,6 +29,7 @@ const accountFromFile = (name: string) =>
 
 /** Column-mapping step for one CSV. Auto-applies a saved bank profile when the header matches. */
 export default function ImportDialog({ file, remaining, profiles, accounts, onImport, onSkip }: Props) {
+  const t = useT();
   const initial = useMemo(() => {
     if (file.pdf) {
       const p = file.pdf.parsed;
@@ -71,7 +73,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
     <label className="field">
       <span>{label}</span>
       <select value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{optional ? '— none —' : '— choose —'}</option>
+        <option value="">{optional ? t('none') : t('choose')}</option>
         {parsed.headers.map((h) => (
           <option key={h} value={h}>
             {h}
@@ -95,19 +97,20 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
       <div className="modal" role="dialog" aria-label="Map CSV columns">
         <header className="modal-head">
           <div>
-            <h2>Map columns</h2>
+            <h2>{t('mapTitle')}</h2>
             <div className="muted">
               {file.name}
-              {remaining > 0 && ` · ${remaining} more file(s) after this`}
+              {remaining > 0 && t('moreFiles', { n: remaining })}
             </div>
           </div>
-          {initial.profileName && <span className="badge">Recognized: {initial.profileName}</span>}
+          {initial.profileName && <span className="badge">{t('recognized', { p: initial.profileName })}</span>}
         </header>
 
         <div className="grid-form">
           <label className="field">
-            <span>Account name</span>
+            <span>{t('accountName')}</span>
             <input list="acct-list" value={account} onChange={(e) => setAccount(e.target.value)} />
+            <span className="field-hint">{t('accountHint')}</span>
             <datalist id="acct-list">
               {accounts.map((a) => (
                 <option key={a} value={a} />
@@ -119,39 +122,39 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
           ) : (
             <label className="field check">
               <input type="checkbox" checked={mapping.hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
-              <span>First row is a header</span>
+              <span>{t('headerRow')}</span>
             </label>
           )}
-          {colSelect('Date', mapping.date, (v) => set({ date: v }))}
+          {colSelect(t('date'), mapping.date, (v) => set({ date: v }))}
           <label className="field">
-            <span>Date format</span>
+            <span>{t('dateFormat')}</span>
             <select value={mapping.dateFormat} onChange={(e) => set({ dateFormat: e.target.value as ColumnMapping['dateFormat'] })}>
-              <option value="auto">Auto (MM/DD/YYYY or YYYY-MM-DD)</option>
+              <option value="auto">{t('dfAuto')}</option>
               <option value="MDY">MM/DD/YYYY</option>
               <option value="DMY">DD/MM/YYYY</option>
               <option value="YMD">YYYY-MM-DD</option>
             </select>
           </label>
-          {colSelect('Description', mapping.description, (v) => set({ description: v }))}
+          {colSelect(t('description'), mapping.description, (v) => set({ description: v }))}
           <label className="field">
-            <span>Amount layout</span>
+            <span>{t('amountLayout')}</span>
             <select value={mapping.amountMode} onChange={(e) => set({ amountMode: e.target.value as ColumnMapping['amountMode'] })}>
-              <option value="signed">One amount column (+/−)</option>
-              <option value="debitCredit">Separate debit / credit columns</option>
+              <option value="signed">{t('signed')}</option>
+              <option value="debitCredit">{t('debitCredit')}</option>
             </select>
           </label>
           {mapping.amountMode === 'signed' ? (
-            colSelect('Amount', mapping.amount, (v) => set({ amount: v }))
+            colSelect(t('amount'), mapping.amount, (v) => set({ amount: v }))
           ) : (
             <>
-              {colSelect('Debit (money out)', mapping.debit, (v) => set({ debit: v || undefined }), true)}
-              {colSelect('Credit (money in)', mapping.credit, (v) => set({ credit: v || undefined }), true)}
+              {colSelect(t('debit'), mapping.debit, (v) => set({ debit: v || undefined }), true)}
+              {colSelect(t('credit'), mapping.credit, (v) => set({ credit: v || undefined }), true)}
             </>
           )}
           <label className="field check wide">
             <input type="checkbox" checked={mapping.invert} onChange={(e) => set({ invert: e.target.checked })} />
             <span>
-              Flip sign — tick this for credit cards that show <b>purchases as positive</b> (Amex, Discover, Citi…)
+              {t('flip')}
             </span>
           </label>
         </div>
@@ -159,11 +162,11 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
         <div className="preview">
           <div className="preview-stats">
             <span>
-              <b>{result.transactions.length}</b> transactions
+              <b>{t('txCount', { n: result.transactions.length })}</b>
             </span>
-            <span className="in">In {money(inflow)}</span>
-            <span className="out">Out {money(outflow)}</span>
-            {result.errors.length > 0 && !fatal && <span className="warn">{result.errors.length} row(s) skipped</span>}
+            <span className="in">{t('in')} {money(inflow)}</span>
+            <span className="out">{t('out')} {money(outflow)}</span>
+            {result.errors.length > 0 && !fatal && <span className="warn">{t('rowsSkipped', { n: result.errors.length })}</span>}
           </div>
           {fatal ? (
             <p className="warn">{fatal.reason}</p>
@@ -171,10 +174,10 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
             <table>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th>→ Counterparty</th>
-                  <th className="num">Amount</th>
+                  <th>{t('date')}</th>
+                  <th>{t('description')}</th>
+                  <th>{t('colCounterparty')}</th>
+                  <th className="num">{t('amount')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -193,42 +196,42 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
           )}
           {result.errors.length > 0 && !fatal && (
             <details>
-              <summary>Skipped rows</summary>
+              <summary>{t('skippedRows')}</summary>
               <ul>
                 {result.errors.slice(0, 20).map((e) => (
                   <li key={e.row}>
-                    Line {e.row}: {e.reason}
+                    {t('line')} {e.row}: {e.reason}
                   </li>
                 ))}
               </ul>
             </details>
           )}
           <p className="muted small">
-            Check: money <b>out</b> should be negative/red. If purchases show as green, tick “Flip sign”.
+            {t('checkSign')}
           </p>
         </div>
 
         <footer className="modal-foot">
           {file.pdf && (
-            <span className="muted small">Same account name for every month = statements are combined (overlaps are skipped).</span>
+            <span className="muted small">{t('pdfCombine')}</span>
           )}
           {!file.pdf && <>
           <label className="field check">
             <input type="checkbox" checked={saveProfile} onChange={(e) => setSaveProfile(e.target.checked)} />
-            <span>Remember this layout as bank</span>
+            <span>{t('remember')}</span>
           </label>
           <input
             className="profile-name"
-            placeholder="e.g. Chase checking"
+            placeholder={t('profilePh')}
             value={profileName}
             disabled={!saveProfile}
             onChange={(e) => setProfileName(e.target.value)}
           />
           </>}
           <span className="spacer" />
-          <button onClick={onSkip}>Skip file</button>
+          <button onClick={onSkip}>{t('skipFile')}</button>
           <button className="primary" disabled={!!fatal || result.transactions.length === 0} onClick={doImport}>
-            Import {result.transactions.length}
+            {t('importN', { n: result.transactions.length })}
           </button>
         </footer>
       </div>
@@ -237,11 +240,12 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
 }
 
 function PdfCheck({ pdf }: { pdf: StatementResult }) {
+  const t = useT();
   const { info, reconcileDiff, balanceMismatches, hasBalance } = pdf;
   const ok = reconcileDiff === 0 && balanceMismatches === 0;
   return (
     <div className={`pdf-check ${ok ? 'ok' : 'bad'}`}>
-      <b>{ok ? '✓ PDF reconciles' : reconcileDiff === null ? 'PDF: no balance totals found' : '⚠ PDF does not reconcile'}</b>
+      <b>{ok ? t('pdfOk') : reconcileDiff === null ? t('pdfNoTotals') : t('pdfBad')}</b>
       {info.periodStart && (
         <div className="small">
           {info.periodStart} → {info.periodEnd}
@@ -249,12 +253,12 @@ function PdfCheck({ pdf }: { pdf: StatementResult }) {
       )}
       {info.beginning !== null && info.ending !== null && (
         <div className="small">
-          Beginning {money(info.beginning)} → ending {money(info.ending)}
-          {reconcileDiff !== null && reconcileDiff !== 0 && <> · off by {money(reconcileDiff)}</>}
+          {t('begEnd', { b: money(info.beginning), e: money(info.ending) })}
+          {reconcileDiff !== null && reconcileDiff !== 0 && t('offBy', { d: money(reconcileDiff) })}
         </div>
       )}
-      {balanceMismatches > 0 && <div className="small">{balanceMismatches} row(s) don't match the printed balance — check them below.</div>}
-      {!hasBalance && <div className="small">No balance column (credit card?). If purchases show green, tick “Flip sign”.</div>}
+      {balanceMismatches > 0 && <div className="small">{t('pdfMismatch', { n: balanceMismatches })}</div>}
+      {!hasBalance && <div className="small">{t('pdfNoBalance')}</div>}
     </div>
   );
 }
