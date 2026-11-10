@@ -11,6 +11,9 @@ const KNOWN: [RegExp, string][] = [
   [/\bATM\b.*\b(WITHDRAWAL|W\/D|CASH)\b|\bCASH WITHDRAWAL/, 'ATM CASH'],
   [/\bAUTOPAY PAYMENT|\bPAYMENT RECEIVED|\bPAYMENT - THANK YOU|\bPAYMENT THANK YOU/, 'CARD PAYMENT RECEIVED'],
   [/\bINTEREST (PAYMENT|PAID|EARNED)/, 'INTEREST'],
+  [/\bREMOTE ONLINE DEPOSIT|\bMOBILE (CHECK )?DEPOSIT/, 'CHECK DEPOSIT (MOBILE)'],
+  [/\bCOINBASE/, 'COINBASE'],
+  [/\bROBINHOOD/, 'ROBINHOOD'],
   [/\bAMAZON PRIME|\bPRIME VIDEO|\bAMZN DIGITAL/, 'AMAZON PRIME'],
   [/\bAMAZON|\bAMZN/, 'AMAZON'],
   [/\bUBER\s*\*?\s*EATS/, 'UBER EATS'],
@@ -71,7 +74,7 @@ const PREFIXES: RegExp[] = [
   /^(ONLINE |MOBILE )?(TRANSFER|XFER)( (TO|FROM))?\s*/,
   /^ZELLE( (PAYMENT|TRANSFER))?( (TO|FROM))?\s*/,
   /^(DEPOSIT|WITHDRAWAL)( FROM| TO)?\s*/,
-  /^(BILL ?PAY(MENT)?|ONLINE PAYMENT|PAYMENT)( TO)?\s*/,
+  /^(BILL ?PAY(MENT)?|ONLINE PAYMENT|PAYMENT)( (TO|SENT|RECEIVED))?\s*/,
   /^(SQ|TST|SP|PP|PAYPAL|DD|IN|BT)\s?\*\s*/,
 ];
 
@@ -85,6 +88,11 @@ export function normalizeCounterparty(description: string): string {
   // BofA-style ACH: "TX COMPTROLLER DES:SALES TAX ID:..." -> "TX COMPTROLLER"
   const des = s.match(/^ (.+?) DES:/);
   if (des) s = ` ${des[1]} `;
+
+  // App-store billing: "GOOGLE *CLAUDE BY AN G.CO/HELPPAY#" -> "GOOGLE PLAY: CLAUDE BY AN"
+  // (otherwise every subscription paid through Google collapses into one "GOOGLE" node)
+  const store = s.match(/\bGOOGLE \*\s*(.+?)(?=\s+(G\.CO|\d{3}-\d{3}-\d{4}|[A-Z]{2} CARD|CARD \d)|\s*$)/);
+  if (store && !/^(YOUTUBE|YT|GSUITE|WORKSPACE|CLOUD|ADS)\b/.test(store[1])) return `GOOGLE PLAY: ${store[1].trim()}`;
 
   for (const [re, name] of KNOWN) if (re.test(s)) return name;
 
@@ -121,6 +129,8 @@ export function normalizeCounterparty(description: string): string {
     .replace(/\b\d{3}[-.]\d{3}[-.]\d{4}\b/g, ' ')
     .replace(/#\s*\d+/g, ' ')
     .replace(/\b[A-Z]*\d[A-Z\d]{5,}\b/g, ' ') // mixed alnum codes like JPM99AB12
+    .replace(/\s(?=[A-Z0-9]{8,}$)[A-Z]*\d[A-Z0-9]*$/, '') // trailing ref like BACGAUY8IDQ7
+    .replace(/\bHTTPS?:?\/*\S*/g, ' ')
     .replace(/\b\d{3,}\b/g, ' ')
     // trailing US state code (keeps the city: "HOUSTON TX" -> "HOUSTON")
     .replace(/\s(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\s*$/, '')

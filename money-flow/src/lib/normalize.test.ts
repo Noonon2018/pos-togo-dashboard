@@ -21,6 +21,16 @@ describe('normalizeCounterparty', () => {
     ['ATM WITHDRAWAL 001234 8/14 5400 BELLAIRE HOUSTON TX', 'ATM CASH'],
     ['AUTOPAY PAYMENT RECEIVED - THANK YOU', 'CARD PAYMENT RECEIVED'],
     ['STATE FARM RO 27 SFPP 1234567', 'STATE FARM'],
+    // Chase checking card format
+    ['Recurring Card Purchase 10/22 Google *Claude By An G.CO/Helppay# CA Card 1368', 'GOOGLE PLAY: CLAUDE BY AN'],
+    ['Recurring Card Purchase 10/16 Google *Grok G.CO/Helppay# CA Card 1368', 'GOOGLE PLAY: GROK'],
+    ['Card Purchase 10/02 Google *Honor of King 855-836-3987 CA Card 1368', 'GOOGLE PLAY: HONOR OF KING'],
+    ['Payment Sent 09/30 Coinbase Https://Www.F CA Card 1368', 'COINBASE'],
+    ['Remote Online Deposit 1', 'CHECK DEPOSIT (MOBILE)'],
+    ['Zelle Payment From Somchai Jaidee Bacgauy8Idq7', 'SOMCHAI JAIDEE'],
+    ['Zelle Payment From Somchai Jaidee Bacf23Jnupvj', 'SOMCHAI JAIDEE'],
+    ['Card Purchase With Pin 10/06 H-E-B #575 Houston TX Card 1368', 'H-E-B'],
+    ['Card Purchase 09/25 Express Food Mart Houston TX Card 1368', 'EXPRESS FOOD MART HOUSTON'],
   ])('%s -> %s', (raw, want) => expect(n(raw)).toBe(want));
 
   it('collapses both sides of an internal transfer to one key', () => {
