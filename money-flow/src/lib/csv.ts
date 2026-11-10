@@ -46,13 +46,15 @@ export function findHeaderRow(text: string): number {
 }
 
 /**
- * Does the first row look like a header? Bank data rows always contain digits (dates, amounts);
- * header cells don't. Empty header cells (named "Column N" by parseCsvText) are ignored —
- * Venmo's header starts with one.
+ * Does the first row look like a header? Data rows contain a date or are mostly numbers; headers
+ * don't (a header may still contain digits, e.g. Etherscan's "CurrentValue @ $3000/Eth").
+ * Empty header cells (named "Column N" by parseCsvText) are ignored — Venmo's header starts with one.
  */
 export function looksLikeHeader(headers: string[]): boolean {
   const real = headers.filter((h) => !/^Column \d+$/.test(h));
-  return real.length > 0 && !real.some((h) => /\d/.test(h));
+  if (!real.length || real.some((h) => parseDate(h) !== null)) return false;
+  const numeric = real.filter((h) => !Number.isNaN(parseAmount(h))).length;
+  return numeric < real.length * 0.5;
 }
 
 /** Stable signature of a header row, used to auto-recognize a bank's export format. */
@@ -88,6 +90,10 @@ export function parseAmount(raw: string | undefined): number {
     negative = !negative;
     s = s.slice(1);
   } else if (s.startsWith('+')) s = s.slice(1);
+  if (/^\d+(\.\d+)?e[-+]?\d+$/i.test(s)) {
+    const n = Number(s); // 1.2E-05 (spreadsheets, crypto exports)
+    return negative ? -n : n;
+  }
   if (!/^\d*\.?\d+$/.test(s)) return NaN;
   const n = Number(s);
   return negative ? -n : n;
@@ -106,6 +112,11 @@ function validDate(y: number, m: number, d: number): string | null {
 /** Parse a date into ISO YYYY-MM-DD. "auto" = YYYY-MM-DD if year first, else US M/D/Y. */
 export function parseDate(raw: string | undefined, format: DateFormat = 'auto'): string | null {
   if (!raw) return null;
+  if (/^\d{9,11}$/.test(raw.trim())) {
+    // unix seconds (blockchain explorers' "UnixTimestamp")
+    const d = new Date(Number(raw.trim()) * 1000);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  }
   const s = raw.trim().split(/[ T]/)[0];
   const parts = s.split(/[/.-]/).map((p) => p.trim());
   if (parts.length !== 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
@@ -246,41 +257,95 @@ export function guessMapping(headers: string[], hasHeader: boolean, rows: string
     return best;
   };
 
-  const from = find(/^from$/i, /^from (name|account|email|email address)$/i, /^sender/i, /^payer/i, /^จาก/, /^ผู้โอน|^ผู้ส่ง|^ผู้จ่าย/);
-  const to = find(/^to$/i, /^to (name|account|email|email address)$/i, /^recipient/i, /^receiver/i, /^beneficiary/i, /^ไป|^ถึง/, /^ผู้รับ/);
+  const from = find(/^from$/i, /^from[ _]?(name|account|email|email address|address)$/i, /^sender/i, /^payer/i, /^จาก/, /^ผู้โอน|^ผู้ส่ง|^ผู้จ่าย/);
+  const to = find(/^to$/i, /^to[ _]?(name|account|email|email address|address)$/i, /^recipient/i, /^receiver/i, /^beneficiary/i, /^ไป|^ถึง/, /^ผู้รับ/);
   const fromTo = !!(from && to);
+
+  // blockchain explorer exports (Etherscan, Blockscout, …)
+  const valueIn = fromTo ? find(/^value[_ ]?in\b/i) : '';
+  const valueOut = fromTo ? find(/^value[_ ]?out\b/i) : '';
+  const unitCol = fromTo ? find(/^(token ?symbol|symbol|asset|currency|coin)$/i) : '';
+  const iF = headers.indexOf(from);
+  const iT = headers.indexOf(to);
+  const addrRows = sample.filter((r) => isCryptoAddress(r[iF] ?? '') || isCryptoAddress(r[iT] ?? '')).length;
+  const crypto = fromTo && !!(valueIn || unitCol || (sample.length > 0 && addrRows / sample.length >= 0.6));
+  const unitFromHeader = (h: string) => h.match(/\(([A-Z][A-Z0-9]{1,9})\)/)?.[1] ?? '';
 
   const debit = fromTo ? '' : find(/^debit/i, /withdraw/i);
   const credit = fromTo ? '' : find(/^credit$/i, /^credit amount/i, /deposit/i);
   const date =
-    find(/^(transaction |trans\.? )?date$/i, /posting date/i, /post(ed)? date/i, /date/i, /^วันที่|^วัน/) ||
+    find(/^(transaction |trans\.? )?date$/i, /posting date/i, /post(ed)? date/i, /date/i, /^วันที่|^วัน/, /timestamp/i) ||
     byContent((v) => parseDate(v) !== null) ||
     headers[0] ||
     '';
-  const amount =
-    find(/^amount$/i, /^amount \(total\)/i, /^gross$/i, /amount/i, /^จำนวน|^ยอด/) ||
-    (debit || credit ? '' : byContent((v) => !Number.isNaN(parseAmount(v)), [date]));
-  const description = fromTo
+  const amount = crypto
+    ? find(/^(token ?value|tokens? ?transferred|value|quantity|amount)$/i, /^value\b/i, /amount/i)
+    : find(/^amount$/i, /^amount \(total\)/i, /^gross$/i, /amount/i, /^จำนวน|^ยอด/) ||
+      (debit || credit ? '' : byContent((v) => !Number.isNaN(parseAmount(v)), [date]));
+  const description = crypto
+    ? find(/^method$/i, /^method ?name$/i, /^type$/i, /^note$/i)
+    : fromTo
     ? find(/^note$/i, /^memo$/i, /^description$/i, /^รายละเอียด|^หมายเหตุ|^บันทึก/, /^type$/i, /^name$/i)
     : find(/^description$/i, /description/i, /payee/i, /merchant/i, /memo/i, /details/i) || textiest([date, amount, debit, credit]);
   return {
     hasHeader,
     date,
     description,
-    amountMode: amount || !(debit || credit) ? 'signed' : 'debitCredit',
-    amount: amount || undefined,
-    debit: debit || undefined,
-    credit: credit || undefined,
+    ...(valueIn && valueOut
+      ? { amountMode: 'debitCredit' as const, amount: undefined, debit: valueOut, credit: valueIn }
+      : {
+          amountMode: amount || !(debit || credit) ? ('signed' as const) : ('debitCredit' as const),
+          amount: amount || undefined,
+          debit: debit || undefined,
+          credit: credit || undefined,
+        }),
     invert: false,
     dateFormat: 'auto',
     flow: fromTo ? 'fromTo' : 'account',
+    ...(crypto
+      ? {
+          crypto: true,
+          unit: unitFromHeader(valueIn || amount) || (unitCol ? '' : unitFromAddresses(sample.flatMap((r) => [r[iF] ?? '', r[iT] ?? '']))),
+          unitCol: unitCol || undefined,
+          statusCol: find(/^status$/i) || undefined,
+          hashCol: find(/^(txhash|tx ?hash|transaction ?hash|hash)$/i) || undefined,
+        }
+      : {}),
     from: from || undefined,
     to: to || undefined,
     me: fromTo ? (detectMe({ headers, rows }, from, to) ?? '') : undefined,
   };
 }
 
-const cleanName = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+/** Party names: upper case for people/shops; crypto addresses keep their exact form (hex in lower case). */
+const cleanName = (s: string | undefined) => {
+  const v = (s ?? '').replace(/\s+/g, ' ').trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(v)) return v.toLowerCase();
+  if (isCryptoAddress(v)) return v;
+  return v.toUpperCase();
+};
+
+/** Ethereum-style (0x + 40 hex), Bitcoin (1…, 3…, bc1…), and other long base58/bech32 addresses. */
+export function isCryptoAddress(v: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(v) || /^(bc1|tb1)[02-9ac-hj-np-z]{20,90}$/.test(v) || /^[13][1-9A-HJ-NP-Za-km-z]{25,34}$/.test(v) || /^xch1[02-9ac-hj-np-z]{40,90}$/.test(v);
+}
+
+/** Best guess of the coin from address formats; the user can correct it in the import dialog. */
+export function unitFromAddresses(values: string[]): string {
+  const count = (re: RegExp) => values.filter((v) => re.test(v)).length;
+  const scores: [string, number][] = [
+    ['ETH', count(/^0x[0-9a-fA-F]{40}$/)],
+    ['BTC', count(/^(bc1|[13])[0-9A-Za-z]{25,90}$/)],
+    ['XCH', count(/^xch1/)],
+  ];
+  const best = scores.sort((a, b) => b[1] - a[1])[0];
+  return best[1] > 0 ? best[0] : 'COIN';
+}
+
+/** 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 -> 0xd8da…6045 */
+export function shortAddress(v: string): string {
+  return isCryptoAddress(v) && v.length > 14 ? `${v.slice(0, 6)}…${v.slice(-4)}` : v;
+}
 
 /**
  * The file owner: the name on (nearly) every row, as in a Venmo/PayPal export of your own account.
@@ -313,12 +378,27 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
   const transactions: Transaction[] = [];
   const links: Transaction[] = [];
   const errors: MapResult['errors'] = [];
-  if (iDate < 0 || iAmt < 0 || iFrom < 0 || iTo < 0) {
+  const iIn = col(mapping.credit);
+  const iOut = col(mapping.debit);
+  const inOut = mapping.amountMode === 'debitCredit' && (iIn >= 0 || iOut >= 0);
+  const iUnit = col(mapping.unitCol);
+  const iStatus = col(mapping.statusCol);
+  const iErr = parsed.headers.findIndex((h) => /^err(or)?[ _]?code$/i.test(h));
+  const iHash = col(mapping.hashCol);
+  if (iDate < 0 || (iAmt < 0 && !inOut) || iFrom < 0 || iTo < 0) {
     return { transactions, links, errors: [{ row: 0, reason: 'Date, From, To and Amount columns are required' }] };
   }
   const me = cleanName(mapping.me);
   const rowOffset = (mapping.hasHeader ? 2 : 1) + (mapping.skipRows ?? 0);
-  const signed = parsed.rows.some((r) => /^\s*[-(]/.test(r[iAmt] ?? '') || /-\s*$/.test(r[iAmt] ?? ''));
+  const signed = !mapping.crypto && iAmt >= 0 && parsed.rows.some((r) => /^\s*[-(]/.test(r[iAmt] ?? '') || /-\s*$/.test(r[iAmt] ?? ''));
+  const rowAmount = (r: string[]) => {
+    if (!inOut) return parseAmount(r[iAmt]);
+    const vin = iIn >= 0 ? parseAmount(r[iIn]) : NaN;
+    const vout = iOut >= 0 ? parseAmount(r[iOut]) : NaN;
+    if (Math.abs(vin) > 0) return Math.abs(vin);
+    if (Math.abs(vout) > 0) return Math.abs(vout);
+    return Number.isNaN(vin) && Number.isNaN(vout) ? NaN : 0;
+  };
   const seen = new Map<string, number>();
   const idFor = (key: string) => {
     const n = (seen.get(key) ?? 0) + 1;
@@ -329,16 +409,42 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
   parsed.rows.forEach((r, idx) => {
     const rowNo = idx + rowOffset;
     const date = parseDate(r[iDate], mapping.dateFormat);
-    const raw = parseAmount(r[iAmt]);
+    const raw = rowAmount(r);
     const from = cleanName(r[iFrom]);
     const to = cleanName(r[iTo]);
+    if (mapping.crypto && ((iStatus >= 0 && /error|fail|revert/i.test(r[iStatus] ?? '')) || (iErr >= 0 && (r[iErr] ?? '').trim()))) {
+      errors.push({ row: rowNo, reason: 'Failed transaction (no money moved)' });
+      return;
+    }
+    if (mapping.crypto && raw === 0) return; // contract calls / approvals: nothing moved
     if (!date || Number.isNaN(raw) || raw === 0 || !from || !to) {
       // Venmo puts balance/summary lines without date or parties into the same file
       if (r.some((c) => c)) errors.push({ row: rowNo, reason: !date ? `Bad date "${r[iDate] ?? ''}"` : 'Missing from/to/amount' });
       return;
     }
-    const amt = Math.round(Math.abs(raw) * 100) / 100;
     const note = iDesc >= 0 ? (r[iDesc] ?? '').replace(/\s+/g, ' ').trim() : '';
+    if (mapping.crypto) {
+      // coins keep their own unit and precision; every row is graph-only (never your dollar income/spending)
+      const unit = ((iUnit >= 0 ? r[iUnit] : '') || mapping.unit || 'COIN').trim().toUpperCase();
+      const amt = Math.round(Math.abs(raw) * 1e8) / 1e8;
+      const hash = iHash >= 0 ? (r[iHash] ?? '').trim() : '';
+      // addresses stay as names, so the same address in another wallet's file joins up in the graph;
+      // `account` holds your wallet address on your own rows (drawn as your wallet), '' otherwise
+      const description = [note, hash ? `tx ${hash.slice(0, 10)}…` : '', `${shortAddress(from)} → ${shortAddress(to)}`].filter(Boolean).join(' · ');
+      links.push({
+        id: idFor(`crypto|${hash}|${date}|${amt}|${unit}|${from}|${to}`),
+        account: me && (from === me || to === me) ? me : '',
+        date,
+        description,
+        amount: -amt,
+        counterparty: to,
+        source,
+        unit,
+        link: { from, to },
+      });
+      return;
+    }
+    const amt = Math.round(Math.abs(raw) * 100) / 100;
     const description = note ? `${note} (${from} → ${to})` : `${from} → ${to}`;
     const mine = me && (from === me || to === me);
     if (mine) {

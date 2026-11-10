@@ -224,3 +224,6 @@ tr.clickable:hover { background: #f9fafb; }
 
 .link-tag { display: inline-block; font-size: 12.5px; padding: 1px 8px; border-radius: 6px; background: #f5f3ff; color: #5b21b6; font-weight: 500; }
 .link-count { color: #5b21b6; }
+
+.sw.others { background: #64748b; }
+.crypto-banner { margin: 0; padding: 8px 12px; border-radius: 8px; background: #fefce8; color: #854d0e; font-size: 13.5px; }

@@ -16,6 +16,8 @@ export interface Transaction {
    * Such rows only appear in the graph; they are not your income or spending.
    */
   link?: { from: string; to: string };
+  /** Crypto unit (ETH, USDC, BTC…). Undefined = US dollars. Crypto never mixes into dollar totals. */
+  unit?: string;
 }
 
 export type AmountMode = 'signed' | 'debitCredit';
@@ -42,6 +44,15 @@ export interface ColumnMapping {
   to?: string;
   /** Your own name/email as it appears in the from/to columns. Empty = all rows are between others. */
   me?: string;
+  /** Crypto explorer file (Etherscan, Blockscout…): rows stay in coin units and are graph-only. */
+  crypto?: boolean;
+  /** Crypto files: a fixed unit (from a header like "Value_IN(ETH)") and/or a per-row symbol column. */
+  unit?: string;
+  unitCol?: string;
+  /** Crypto files: status column; rows marked as errors/failed are skipped. */
+  statusCol?: string;
+  /** Crypto files: transaction hash, kept in the description for checking on the explorer. */
+  hashCol?: string;
 }
 
 export interface BankProfile {

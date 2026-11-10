@@ -7,6 +7,8 @@ export interface GraphNode {
   id: string;
   label: string;
   kind: 'account' | 'counterparty' | 'other';
+  /** undefined = dollars; a coin (ETH…) when all its flows are in that coin; 'MIXED' otherwise */
+  unit?: string;
   totalIn: number; // money flowing INTO this node
   totalOut: number; // money flowing OUT of this node
   count: number;
@@ -19,6 +21,8 @@ export interface GraphEdge {
   count: number;
   total: number;
   txIds: string[];
+  /** undefined = dollars, otherwise the coin */
+  unit?: string;
 }
 
 export interface Graph {
@@ -29,6 +33,7 @@ export interface Graph {
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const round8 = (n: number) => Math.round(n * 1e8) / 1e8;
 const dayNum = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
 
 export const accountNodeId = (name: string) => `acct:${name}`;
@@ -99,33 +104,63 @@ export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filter
   const mirrored = findMirroredTransfers(txns, aliases, accounts);
   // links: date range and minimum amount apply; account/direction filters are about my accounts
   const linkTx = filterTransactions(links, { ...filters, accounts: [], direction: 'all' }).filter((t) => t.link);
+  // crypto wallets you imported (the side renamed to the wallet's name) are drawn like accounts
+  const wallets = new Set(links.filter((l) => l.unit && l.account).map((l) => l.account));
   const ownName = (raw: string) => {
     const n = resolveAlias(raw, aliases);
     for (const a of accounts) if (a.toUpperCase() === n.toUpperCase()) return { account: a, name: a };
+    if (wallets.has(raw)) return { account: raw, name: n }; // id stays the address, label follows a rename
     return { account: null as string | null, name: n };
   };
 
-  // rank external counterparties by volume to apply topN
-  const volume = new Map<string, number>();
+  // rank external counterparties by volume to apply topN — per unit, since dollars and coins don't compare
+  const volume = new Map<string, Map<string, number>>(); // unit ('' = $) -> name -> volume
+  const addVol = (unit: string, name: string, v: number) => {
+    const m = volume.get(unit) ?? volume.set(unit, new Map()).get(unit)!;
+    m.set(name, (m.get(name) ?? 0) + v);
+  };
   for (const t of txns) {
     if (mirrored.has(t.id) || ownAccountOf(t, aliases, accounts)) continue;
-    const n = counterpartyName(t, aliases);
-    volume.set(n, (volume.get(n) ?? 0) + Math.abs(t.amount));
+    addVol('', counterpartyName(t, aliases), Math.abs(t.amount));
   }
   for (const t of linkTx) {
     for (const side of [t.link!.from, t.link!.to]) {
       const o = ownName(side);
-      if (!o.account) volume.set(o.name, (volume.get(o.name) ?? 0) + Math.abs(t.amount));
+      if (!o.account) addVol(t.unit ?? '', o.name, Math.abs(t.amount));
     }
   }
-  const ranked = [...volume.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
-  const keep = filters.topN > 0 ? new Set(ranked.slice(0, filters.topN)) : new Set(ranked);
-  const otherCount = ranked.length - keep.size;
+  const keep = new Map<string, Set<string>>();
+  const otherCount = new Map<string, number>();
+  for (const [unit, m] of volume) {
+    const ranked = [...m.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+    const k = new Set(filters.topN > 0 ? ranked.slice(0, filters.topN) : ranked);
+    // a name kept in any unit stays a single node
+    keep.set(unit, k);
+    otherCount.set(unit, ranked.length - k.size);
+  }
+  const isKept = (name: string, unit: string) => keep.get(unit)?.has(name) || [...keep.values()].some((k) => k.has(name));
+  const otherNode = (unit: string) =>
+    unit
+      ? node(`${OTHER_NODE}|${unit}`, `OTHER (${otherCount.get(unit) ?? 0}) ${unit}`, 'other')
+      : node(OTHER_NODE, `OTHER (${otherCount.get('') ?? 0} counterparties)`, 'other');
 
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, GraphEdge>();
+  const units = new Map<string, Set<string>>(); // node id -> units seen
   const node = (id: string, label: string, kind: GraphNode['kind']) =>
     nodes.get(id) ?? nodes.set(id, { id, label, kind, totalIn: 0, totalOut: 0, count: 0 }).get(id)!;
+  const flow = (src: GraphNode, dst: GraphNode, amt: number, id: string, unit?: string) => {
+    src.totalOut += amt;
+    dst.totalIn += amt;
+    src.count++;
+    dst.count++;
+    for (const n of [src, dst]) (units.get(n.id) ?? units.set(n.id, new Set()).get(n.id)!).add(unit ?? '');
+    const eid = unit ? `${src.id}->${dst.id}|${unit}` : `${src.id}->${dst.id}`;
+    const e = edges.get(eid) ?? edges.set(eid, { id: eid, source: src.id, target: dst.id, count: 0, total: 0, txIds: [], ...(unit ? { unit } : {}) }).get(eid)!;
+    e.count++;
+    e.total += amt;
+    e.txIds.push(id);
+  };
 
   for (const t of txns) {
     if (mirrored.has(t.id)) continue;
@@ -135,47 +170,31 @@ export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filter
     if (own) other = node(accountNodeId(own), own, 'account');
     else {
       const name = counterpartyName(t, aliases);
-      other = keep.has(name)
-        ? node(cpNodeId(name), name, 'counterparty')
-        : node(OTHER_NODE, `OTHER (${otherCount} counterparties)`, 'other');
+      other = isKept(name, '') ? node(cpNodeId(name), name, 'counterparty') : otherNode('');
     }
-    const amt = Math.abs(t.amount);
     const [src, dst] = t.amount < 0 ? [acct, other] : [other, acct];
-    src.totalOut += amt;
-    dst.totalIn += amt;
-    src.count++;
-    dst.count++;
-    const eid = `${src.id}->${dst.id}`;
-    const e = edges.get(eid) ?? edges.set(eid, { id: eid, source: src.id, target: dst.id, count: 0, total: 0, txIds: [] }).get(eid)!;
-    e.count++;
-    e.total += amt;
-    e.txIds.push(t.id);
+    flow(src, dst, Math.abs(t.amount), t.id);
   }
-  const partyNode = (raw: string) => {
+  const partyNode = (raw: string, unit: string) => {
     const o = ownName(raw);
-    if (o.account) return node(accountNodeId(o.account), o.account, 'account');
-    return keep.has(o.name) ? node(cpNodeId(o.name), o.name, 'counterparty') : node(OTHER_NODE, `OTHER (${otherCount} counterparties)`, 'other');
+    if (o.account) return node(accountNodeId(o.account), wallets.has(o.account) ? o.name : o.account, 'account');
+    return isKept(o.name, unit) ? node(cpNodeId(o.name), o.name, 'counterparty') : otherNode(unit);
   };
   for (const t of linkTx) {
-    const src = partyNode(t.link!.from);
-    const dst = partyNode(t.link!.to);
+    const src = partyNode(t.link!.from, t.unit ?? '');
+    const dst = partyNode(t.link!.to, t.unit ?? '');
     if (src === dst) continue; // both grouped into OTHER, or a self-transfer
-    const amt = Math.abs(t.amount);
-    src.totalOut += amt;
-    dst.totalIn += amt;
-    src.count++;
-    dst.count++;
-    const eid = `${src.id}->${dst.id}`;
-    const e = edges.get(eid) ?? edges.set(eid, { id: eid, source: src.id, target: dst.id, count: 0, total: 0, txIds: [] }).get(eid)!;
-    e.count++;
-    e.total += amt;
-    e.txIds.push(t.id);
+    flow(src, dst, Math.abs(t.amount), t.id, t.unit);
   }
   for (const n of nodes.values()) {
-    n.totalIn = round2(n.totalIn);
-    n.totalOut = round2(n.totalOut);
+    const u = [...(units.get(n.id) ?? [])];
+    const unit = u.length === 1 ? u[0] || undefined : u.length > 1 ? 'MIXED' : undefined;
+    if (unit) n.unit = unit;
+    const r = unit ? round8 : round2;
+    n.totalIn = r(n.totalIn);
+    n.totalOut = r(n.totalOut);
   }
-  for (const e of edges.values()) e.total = round2(e.total);
+  for (const e of edges.values()) e.total = e.unit ? round8(e.total) : round2(e.total);
   return { nodes: [...nodes.values()], edges: [...edges.values()], mirroredTransferIds: [...mirrored] };
 }
 

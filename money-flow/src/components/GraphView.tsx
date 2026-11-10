@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import cytoscape, { type Core, type ElementDefinition } from 'cytoscape';
 import type { Graph } from '../lib/aggregate';
-import { moneyShort } from '../format';
+import { amountShort } from '../format';
+import { shortAddress } from '../lib/csv';
 
 export interface Selection {
   kind: 'node' | 'edge';
@@ -83,16 +84,21 @@ const STYLE: cytoscape.StylesheetJson = [
 ];
 
 function toElements(graph: Graph): ElementDefinition[] {
-  const maxEdge = Math.max(1, ...graph.edges.map((e) => e.total));
-  const maxNode = Math.max(1, ...graph.nodes.map((n) => n.totalIn + n.totalOut));
+  // sizes are scaled per unit: dollars and coins can't be compared
+  const maxEdge = new Map<string, number>();
+  for (const e of graph.edges) maxEdge.set(e.unit ?? '', Math.max(maxEdge.get(e.unit ?? '') ?? 1e-12, e.total));
+  const maxNode = new Map<string, number>();
+  for (const n of graph.nodes) maxNode.set(n.unit ?? '', Math.max(maxNode.get(n.unit ?? '') ?? 1e-12, n.totalIn + n.totalOut));
   const nodes: ElementDefinition[] = graph.nodes.map((n) => {
     const vol = n.totalIn + n.totalOut;
-    const size = n.kind === 'account' ? 70 : 18 + 42 * Math.sqrt(vol / maxNode);
+    const size = n.kind === 'account' ? 70 : 18 + 42 * Math.sqrt(n.unit === 'MIXED' ? 0.3 : vol / (maxNode.get(n.unit ?? '') ?? 1));
     const flow = n.kind !== 'counterparty' ? undefined : n.totalIn > 0 && n.totalOut > 0 ? 'both' : n.totalOut > 0 ? 'in' : 'out';
+    const name = shortAddress(n.label);
+    const amount = amountShort(vol, n.unit);
     return {
       data: {
         id: n.id,
-        label: n.kind === 'account' ? n.label : `${n.label}\n${moneyShort(vol)}`,
+        label: n.kind === 'account' ? name : amount ? `${name}\n${amount}` : name,
         kind: n.kind,
         flow,
         size,
@@ -104,14 +110,16 @@ function toElements(graph: Graph): ElementDefinition[] {
   const edges: ElementDefinition[] = graph.edges.map((e) => {
     const transfer = kindOf.get(e.source) === 'account' && kindOf.get(e.target) === 'account';
     const intoAccount = kindOf.get(e.target) === 'account';
+    const fromAccount = kindOf.get(e.source) === 'account';
     return {
       data: {
         id: e.id,
         source: e.source,
         target: e.target,
-        label: `${e.count} / ${moneyShort(e.total)}`,
-        width: 1 + 11 * Math.sqrt(e.total / maxEdge),
-        color: transfer ? '#7c3aed' : intoAccount ? '#16a34a' : '#dc2626',
+        label: `${e.count} / ${amountShort(e.total, e.unit)}`,
+        width: 1 + 11 * Math.sqrt(e.total / (maxEdge.get(e.unit ?? '') ?? 1)),
+        // between two outside parties: grey-blue (not your money in or out)
+        color: transfer ? '#7c3aed' : intoAccount ? '#16a34a' : fromAccount ? '#dc2626' : '#64748b',
       },
     };
   });

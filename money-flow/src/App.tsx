@@ -419,6 +419,9 @@ export default function App() {
             <span>
               <i className="sw xfer" /> {t('legXfer')}
             </span>
+            <span>
+              <i className="sw others" /> {t('legOthers')}
+            </span>
             <span className="muted">{t('legEdge')}</span>
           </div>
         </main>

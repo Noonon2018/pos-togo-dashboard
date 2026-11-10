@@ -11,10 +11,11 @@ import {
   type Graph,
 } from '../lib/aggregate';
 import type { Aliases, Transaction } from '../lib/types';
-import { money } from '../format';
+import { amountFmt, money } from '../format';
 import { useT } from '../i18n';
 import { mergeKind } from '../lib/mergeCheck';
 import { resolveAlias } from '../lib/normalize';
+import { isCryptoAddress } from '../lib/csv';
 import type { Selection } from './GraphView';
 
 interface Props {
@@ -365,7 +366,7 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
           {label(e.source)} → {label(e.target)}
         </h2>
         <p>
-          <b>{e.count}</b> {tr('transactions')} · <b>{money(e.total)}</b>
+          <b>{e.count}</b> {tr('transactions')} · <b>{amountFmt(e.total, e.unit)}</b>
         </p>
         <TxList txns={list} aliases={aliases} />
       </div>
@@ -392,11 +393,11 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
       <div className="kpis">
         <div>
           <span className="muted small">{node.kind === 'account' ? tr('intoAccount') : tr('theyReceived')}</span>
-          <b className={node.kind === 'account' ? 'in' : 'out'}>{money(node.totalIn)}</b>
+          <b className={node.kind === 'account' ? 'in' : 'out'}>{node.unit === 'MIXED' ? '—' : amountFmt(node.totalIn, node.unit)}</b>
         </div>
         <div>
           <span className="muted small">{node.kind === 'account' ? tr('outOfAccount') : tr('theySent')}</span>
-          <b className={node.kind === 'account' ? 'out' : 'in'}>{money(node.totalOut)}</b>
+          <b className={node.kind === 'account' ? 'out' : 'in'}>{node.unit === 'MIXED' ? '—' : amountFmt(node.totalOut, node.unit)}</b>
         </div>
         <div>
           <span className="muted small">{tr('transactions')}</span>
@@ -404,7 +405,7 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
         </div>
       </div>
 
-      {node.kind === 'counterparty' && (
+      {(node.kind === 'counterparty' || isCryptoAddress(node.id.replace(/^acct:/, ''))) && (
         <>
           <div className="merge-bar">
             <input list="rename-list" placeholder={tr('renamePh')} value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -425,8 +426,10 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
               disabled={!newName.trim()}
               onClick={() => {
                 const to = newName.trim();
-                if (!onRename([node.label], to)) return;
-                onSelect(accounts.some((a) => a.toUpperCase() === to.toUpperCase()) ? null : nodeOf(to));
+                const fromName = isCryptoAddress(node.id.replace(/^acct:/, '')) ? node.id.replace(/^acct:/, '') : node.label;
+                if (!onRename([fromName], to)) return;
+                if (fromName !== node.label || node.kind === 'account') onSelect({ kind: 'node', id: node.id });
+                else onSelect(accounts.some((a) => a.toUpperCase() === to.toUpperCase()) ? null : nodeOf(to));
                 setNewName('');
               }}
             >
@@ -462,7 +465,7 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
                   {e.source === node.id ? '→' : '←'} {label}
                 </span>
                 <span className="num">
-                  {e.count} / {money(e.total)}
+                  {e.count} / {amountFmt(e.total, e.unit)}
                 </span>
               </li>
             );
@@ -498,7 +501,7 @@ function TxList({ txns, aliases, compact }: { txns: Transaction[]; aliases: Alia
                 )}
                 <div className="muted small desc">{t.link ? t.description : `${t.account} · ${t.description}`}</div>
               </td>
-              <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{money(t.link ? -t.amount : t.amount)}</td>
+              <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{amountFmt(t.link ? -t.amount : t.amount, t.unit)}</td>
             </tr>
           ))}
         </tbody>

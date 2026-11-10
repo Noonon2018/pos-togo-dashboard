@@ -41,6 +41,18 @@
 - ชื่อในไฟล์ที่ตรงกับชื่อบัญชีในแอป จะต่อเส้นเข้ากล่องบัญชีนั้น
 - ตัวอย่าง: `samples/venmo-sample.csv`, `samples/links-sample.csv` (ข้อมูลสมมติ)
 
+## คริปโต: ตามเส้นเงินบน blockchain
+
+ข้อมูล blockchain เป็นข้อมูลสาธารณะ จึงตามเส้นเงินของ address ใดก็ได้อย่างถูกกฎหมาย
+1. ใน explorer (etherscan.io, basescan.org, polygonscan.com, explorer ที่ใช้ Blockscout ฯลฯ) เปิดหน้า address → **Export CSV**
+2. ลากไฟล์ใส่แอป ระบบตรวจว่าเป็นไฟล์คริปโต (มีคอลัมน์ From/To ร่วมกับ Value_IN/Value_OUT หรือ TokenSymbol หรือค่าในคอลัมน์ From/To เป็น address)
+   - เหรียญอยู่ในหน่วยของมัน (ETH, USDC…) **ไม่รวมกับดอลลาร์** และไม่นับในหน้าสรุป
+   - address ที่อยู่ในเกือบทุกแถว = กระเป๋าที่ export มา แสดงเป็นกล่องสีน้ำเงิน และเปลี่ยนชื่อได้
+   - ข้ามรายการที่ล้มเหลว (Status/ErrCode) และรายการมูลค่า 0 (approve / contract call)
+3. ตามเงินต่อหลายทอด: export address ปลายทางมาใส่เพิ่ม กราฟจะเชื่อมกันเอง รายการเดียวกัน (hash เดียวกัน) นับครั้งเดียว
+
+ข้อจำกัด: ยังไม่แปลงเป็นดอลลาร์ ไม่นับค่า gas ไม่รวม internal transactions และ Bitcoin/Chia (โมเดล UTXO/coin) export ออกมาเป็น "จาก → ไป" ไม่ตรงแบบ Ethereum ไฟล์ตัวอย่าง (address สมมติ): `samples/crypto-*.csv`
+
 ## วิธีรัน (สำหรับนักพัฒนา)
 
 ```sh

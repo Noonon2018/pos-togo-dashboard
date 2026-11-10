@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { applyMapping, detectMe, findHeaderRow, guessMapping, headerSignature, looksLikeHeader, parseCsvText, type ParsedCsv } from '../lib/csv';
+import { applyMapping, detectMe, findHeaderRow, guessMapping, headerSignature, looksLikeHeader, parseCsvText, shortAddress, type ParsedCsv } from '../lib/csv';
 import type { StatementResult } from '../lib/pdfStatement';
 import type { BankProfile, ColumnMapping, Transaction } from '../lib/types';
-import { money } from '../format';
+import { amountFmt, money } from '../format';
 import { useT } from '../i18n';
 
 export interface PendingFile {
@@ -79,6 +79,17 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
     for (const r of parsed.rows) for (const i of [iF, iT]) if (i >= 0 && r[i]) c.set(r[i].toUpperCase().trim(), (c.get(r[i].toUpperCase().trim()) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n]) => n);
   }, [isFromTo, parsed, mapping.from, mapping.to]);
+  // crypto: totals into / out of your wallet, per coin
+  const walletTotals = useMemo(() => {
+    const m = new Map<string, { in: number; out: number }>();
+    for (const l of result.links) {
+      if (!l.unit || !l.link) continue;
+      const v = m.get(l.unit) ?? m.set(l.unit, { in: 0, out: 0 }).get(l.unit)!;
+      if (l.link.to === l.account) v.in += -l.amount;
+      if (l.link.from === l.account) v.out += -l.amount;
+    }
+    return [...m.entries()];
+  }, [result.links]);
   const inflow = result.transactions.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const outflow = result.transactions.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0);
   const fatal = result.errors.find((e) => e.row === 0);
@@ -121,7 +132,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
         </header>
 
         <div className="grid-form">
-          <label className="field">
+          <label className="field" hidden={!!mapping.crypto}>
             <span>{t('accountName')}</span>
             <input list="acct-list" value={account} onChange={(e) => setAccount(e.target.value)} />
             <span className="field-hint">{t('accountHint')}</span>
@@ -158,14 +169,29 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
               </select>
             </label>
           )}
+          {mapping.crypto && <p className="crypto-banner wide">{t('cryptoDetected')}</p>}
           {isFromTo ? (
             <>
               {colSelect(t('fromCol'), mapping.from, (v) => set({ from: v || undefined }))}
               {colSelect(t('toCol'), mapping.to, (v) => set({ to: v || undefined }))}
-              {colSelect(t('amount'), mapping.amount, (v) => set({ amount: v }))}
+              {mapping.amountMode === 'debitCredit' ? (
+                <>
+                  {colSelect(t('valueIn'), mapping.credit, (v) => set({ credit: v || undefined }), true)}
+                  {colSelect(t('valueOut'), mapping.debit, (v) => set({ debit: v || undefined }), true)}
+                </>
+              ) : (
+                colSelect(t('amount'), mapping.amount, (v) => set({ amount: v }))
+              )}
               {colSelect(t('noteCol'), mapping.description, (v) => set({ description: v }), true)}
+              {mapping.crypto && (
+                <label className="field">
+                  <span>{t('unitLabel')}</span>
+                  <input id="coin-unit" value={mapping.unit ?? ''} placeholder="ETH" onChange={(e) => set({ unit: e.target.value.toUpperCase() })} />
+                  <span className="field-hint">{mapping.unitCol ? t('unitFromCol', { c: mapping.unitCol }) : t('unitHint')}</span>
+                </label>
+              )}
               <label className="field wide">
-                <span>{t('meLabel')}</span>
+                <span>{mapping.crypto ? t('meWalletLabel') : t('meLabel')}</span>
                 <input id="me-name" list="me-list" value={mapping.me ?? ''} placeholder={t('mePh')} onChange={(e) => set({ me: e.target.value })} />
                 <datalist id="me-list">
                   {topNames.map((n) => (
@@ -206,12 +232,29 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
 
         <div className="preview">
           <div className="preview-stats">
-            <span>
-              <b>{t('txCount', { n: result.transactions.length })}</b>
-            </span>
-            {isFromTo && <span className="link-count">{t('linkCount', { n: result.links.length })}</span>}
-            <span className="in">{t('in')} {money(inflow)}</span>
-            <span className="out">{t('out')} {money(outflow)}</span>
+            {!mapping.crypto && (
+              <span>
+                <b>{t('txCount', { n: result.transactions.length })}</b>
+              </span>
+            )}
+            {isFromTo && !mapping.crypto && <span className="link-count">{t('linkCount', { n: result.links.length })}</span>}
+            {mapping.crypto && (
+              <span className="link-count">
+                {t('cryptoCount', { n: result.links.length })}
+                {walletTotals.map(([u, v]) => (
+                  <span key={u}>
+                    {' · '}
+                    {t('walletIn', { v: amountFmt(v.in, u) })} · {t('walletOut', { v: amountFmt(v.out, u) })}
+                  </span>
+                ))}
+              </span>
+            )}
+            {!mapping.crypto && (
+              <>
+                <span className="in">{t('in')} {money(inflow)}</span>
+                <span className="out">{t('out')} {money(outflow)}</span>
+              </>
+            )}
             {result.errors.length > 0 && !fatal && <span className="warn">{t('rowsSkipped', { n: result.errors.length })}</span>}
           </div>
           {fatal ? (
@@ -234,13 +277,13 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
                     <td>
                       {t.link ? (
                         <span className="link-tag">
-                          {t.link.from} → {t.link.to}
+                          {shortAddress(t.link.from)} → {shortAddress(t.link.to)}
                         </span>
                       ) : (
                         <b>{t.counterparty}</b>
                       )}
                     </td>
-                    <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{money(t.link ? -t.amount : t.amount)}</td>
+                    <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{amountFmt(t.link ? -t.amount : t.amount, t.unit)}</td>
                   </tr>
                 ))}
               </tbody>
