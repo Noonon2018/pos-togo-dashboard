@@ -194,3 +194,23 @@ tr.clickable:hover { background: #f9fafb; }
   .kpis-row { grid-template-columns: repeat(2, 1fr); }
   .summary-cols { grid-template-columns: 1fr; }
 }
+
+.cycle { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.cycle select { font-size: 13px; }
+.budgets { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.budget-top, .budget-foot { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.budget-bar { position: relative; height: 10px; background: #eef1f5; border-radius: 5px; overflow: hidden; margin: 4px 0; }
+.budget-bar span { position: absolute; left: 0; top: 0; bottom: 0; background: #16a34a; border-radius: 5px; }
+.budget-bar i { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, rgba(217,119,6,.45) 0 4px, transparent 4px 8px); }
+.budget.near .budget-bar span, .budget.pace .budget-bar span { background: #d97706; }
+.budget.over .budget-bar span { background: #dc2626; }
+.budget-add { display: grid; grid-template-columns: 1fr 140px auto; gap: 6px; }
+.budget-add select, .budget-add input { min-width: 0; width: 100%; }
+.budget-chip { margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #ecfdf5; color: #166534; font-weight: 500; }
+.budget-chip.over { background: #fef2f2; color: #b91c1c; }
+.goal-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.goal-inputs input { width: 100%; }
+.goal-bar { height: 14px; background: #eef1f5; border-radius: 7px; overflow: hidden; margin-top: 10px; }
+.goal-bar span { display: block; height: 100%; background: linear-gradient(90deg, #2563eb, #16a34a); border-radius: 7px; }
+#goal p, #budgets p { margin: 6px 0 0; }
+@media (max-width: 500px) { .budget-add { grid-template-columns: 1fr 1fr; } .budget-add button { grid-column: 1 / -1; } }

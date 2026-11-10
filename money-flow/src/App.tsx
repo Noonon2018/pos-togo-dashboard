@@ -10,7 +10,20 @@ import { buildGraph, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
-import { loadAliases, loadCategoryOverrides, loadProfiles, saveAliases, saveCategoryOverrides, saveProfiles } from './lib/storage';
+import {
+  loadAliases,
+  loadBudgets,
+  loadCategoryOverrides,
+  loadCycle,
+  loadGoal,
+  loadProfiles,
+  saveAliases,
+  saveBudgets,
+  saveCategoryOverrides,
+  saveCycle,
+  saveGoal,
+  saveProfiles,
+} from './lib/storage';
 import { DEFAULT_FILTERS, type BankProfile, type Filters, type Transaction } from './lib/types';
 
 const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
@@ -27,6 +40,11 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [view, setView] = useState<'summary' | 'graph'>('summary');
   const [overrides, setOverrides] = useState(loadCategoryOverrides);
+  const [budgets, setBudgets] = useState(loadBudgets);
+  const [goal, setGoal] = useState(loadGoal);
+  const [cycle, setCycle] = useState(loadCycle);
+  /** statement periods of imported PDFs, so a statement that ends without a transaction still counts as complete */
+  const [stmtRange, setStmtRange] = useState<{ from?: string; to?: string }>({});
   const t = useT();
   const { lang, setLang } = useLang();
   const graphRef = useRef<GraphHandle>(null);
@@ -35,6 +53,9 @@ export default function App() {
   useEffect(() => saveAliases(aliases), [aliases]);
   useEffect(() => saveProfiles(profiles), [profiles]);
   useEffect(() => saveCategoryOverrides(overrides), [overrides]);
+  useEffect(() => saveBudgets(budgets), [budgets]);
+  useEffect(() => saveGoal(goal), [goal]);
+  useEffect(() => saveCycle(cycle), [cycle]);
 
   const accounts = useMemo(() => [...new Set(txns.map((t) => t.account))].sort(), [txns]);
   const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
@@ -88,6 +109,16 @@ export default function App() {
       setStatus(t('imported', { n: fresh.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
       return [...cur, ...fresh];
     });
+    const info = file.pdf?.info;
+    if (info?.periodStart && info.periodEnd) {
+      setStmtRange((r) => ({
+        from: !r.from || info.periodStart! < r.from ? info.periodStart! : r.from,
+        to: !r.to || info.periodEnd! > r.to ? info.periodEnd! : r.to,
+      }));
+      // statement cycles (e.g. Chase: 24th → 23rd): follow them unless the user chose a day
+      const day = Number(info.periodStart.slice(8, 10));
+      setCycle((c) => (c.manual || day < 1 || day > 28 ? c : { day, manual: false }));
+    }
     if (profile) setProfiles((ps) => [...ps.filter((p) => p.signature !== profile.signature && p.name !== profile.name), profile]);
     setQueue((q) => q.slice(1));
   };
@@ -108,6 +139,7 @@ export default function App() {
     setTxns([]);
     setSelection(null);
     setFilters(DEFAULT_FILTERS);
+    setStmtRange({});
     setStatus('');
   };
 
@@ -275,6 +307,22 @@ export default function App() {
               })
             }
             onResetOverrides={() => setOverrides({})}
+            cycleDay={cycle.day}
+            cycleAuto={!cycle.manual}
+            onCycleDay={(day) => setCycle({ day, manual: true })}
+            dataFrom={stmtRange.from}
+            dataTo={stmtRange.to}
+            budgets={budgets}
+            onBudget={(id, amount) =>
+              setBudgets((b) => {
+                const next = { ...b };
+                if (amount && amount > 0) next[id] = amount;
+                else delete next[id];
+                return next;
+              })
+            }
+            goal={goal}
+            onGoal={setGoal}
           />
         </main>
       ) : (

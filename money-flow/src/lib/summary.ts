@@ -1,13 +1,10 @@
 import { CATEGORIES, categoryOf, type CategorizedTx } from './categories';
 import { detectRecurring, findDuplicates } from './aggregate';
 import type { Aliases } from './types';
+import { budgetStatus } from './budget';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const dayNum = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
-const daysInMonth = (ym: string) => {
-  const [y, m] = ym.split('-').map(Number);
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
-};
 
 export const ALL = 'all';
 
@@ -38,34 +35,80 @@ export interface PeriodSummary {
   txCount: number;
 }
 
-export function monthsIn(txns: CategorizedTx[]): string[] {
-  return [...new Set(txns.map((t) => t.date.slice(0, 7)))].sort();
+/**
+ * Periods. A period key is "YYYY-MM": the cycle that starts in that month on `cycleDay`.
+ * cycleDay 1 = calendar months. cycleDay 24 = statement cycles like Chase (Sep 24 → Oct 23).
+ */
+export interface PeriodOptions {
+  cycleDay?: number;
+  /** Known data range beyond the transaction dates (e.g. statement period from a PDF). */
+  dataFrom?: string;
+  dataTo?: string;
+  /** category id -> budget per period */
+  budgets?: Record<string, number>;
 }
 
-/** Default period: the latest month that has at least 20 days of data, else everything. */
-export function defaultPeriod(txns: CategorizedTx[]): string {
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const isoAdd = (iso: string, days: number) => new Date((dayNum(iso) + days) * 86_400_000).toISOString().slice(0, 10);
+export const clampCycleDay = (d?: number) => Math.min(28, Math.max(1, Math.round(d || 1)));
+
+function prevMonth(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`;
+}
+function nextMonth(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${pad2(m + 1)}`;
+}
+
+export function periodRange(key: string, cycleDay = 1): { from: string; to: string } {
+  const day = pad2(clampCycleDay(cycleDay));
+  return { from: `${key}-${day}`, to: isoAdd(`${nextMonth(key)}-${day}`, -1) };
+}
+
+export function periodKeyOf(date: string, cycleDay = 1): string {
+  const key = date.slice(0, 7);
+  return Number(date.slice(8, 10)) >= clampCycleDay(cycleDay) ? key : prevMonth(key);
+}
+
+export function periodsIn(txns: { date: string }[], cycleDay = 1): string[] {
+  return [...new Set(txns.map((t) => periodKeyOf(t.date, cycleDay)))].sort();
+}
+/** @deprecated use periodsIn — kept for calendar months */
+export const monthsIn = (txns: { date: string }[]) => periodsIn(txns, 1);
+
+function bounds(all: { date: string }[], opts: PeriodOptions) {
+  const ds = all.map((t) => t.date).sort();
+  let min = ds[0] ?? '';
+  let max = ds[ds.length - 1] ?? '';
+  if (opts.dataFrom && (!min || opts.dataFrom < min)) min = opts.dataFrom;
+  if (opts.dataTo && (!max || opts.dataTo > max)) max = opts.dataTo;
+  return { min, max };
+}
+
+function coverageOf(period: string, min: string, max: string, cycleDay = 1) {
+  if (period === ALL || !min) {
+    const d = min ? dayNum(max) - dayNum(min) + 1 : 0;
+    return { from: min, to: max, days: d, fullDays: d };
+  }
+  const r = periodRange(period, cycleDay);
+  const from = min > r.from ? min : r.from;
+  const to = max < r.to ? max : r.to;
+  return { from, to, days: Math.max(0, dayNum(to) - dayNum(from) + 1), fullDays: dayNum(r.to) - dayNum(r.from) + 1 };
+}
+
+const inPeriod = (date: string, period: string, cycleDay = 1) => {
+  if (period === ALL) return true;
+  const r = periodRange(period, cycleDay);
+  return date >= r.from && date <= r.to;
+};
+
+/** Default period: the latest one with at least 20 days of data, else everything. */
+export function defaultPeriod(txns: CategorizedTx[], opts: PeriodOptions = {}): string {
   if (!txns.length) return ALL;
-  const ds = txns.map((t) => t.date).sort();
-  const [min, max] = [ds[0], ds[ds.length - 1]];
-  const months = monthsIn(txns).reverse();
-  for (const m of months) if (coverageOf(m, min, max).days >= 20) return m;
+  const { min, max } = bounds(txns, opts);
+  for (const k of periodsIn(txns, opts.cycleDay).reverse()) if (coverageOf(k, min, max, opts.cycleDay).days >= 20) return k;
   return ALL;
-}
-
-function coverageOf(period: string, min: string, max: string) {
-  if (period === ALL) return { from: min, to: max, days: dayNum(max) - dayNum(min) + 1, fullDays: dayNum(max) - dayNum(min) + 1 };
-  const start = `${period}-01`;
-  const end = `${period}-${String(daysInMonth(period)).padStart(2, '0')}`;
-  const from = min > start ? min : start;
-  const to = max < end ? max : end;
-  return { from, to, days: Math.max(0, dayNum(to) - dayNum(from) + 1), fullDays: daysInMonth(period) };
-}
-
-const inPeriod = (t: CategorizedTx, period: string) => period === ALL || t.date.startsWith(period);
-
-function prevMonth(period: string): string {
-  const [y, m] = period.split('-').map(Number);
-  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
 function totals(txns: CategorizedTx[]) {
@@ -111,15 +154,16 @@ function groupCategories(txns: CategorizedTx[], prevTx: CategorizedTx[], kinds: 
     .sort((a, b) => b.total - a.total);
 }
 
-export function summarize(all: CategorizedTx[], period: string): PeriodSummary {
-  const ds = all.map((t) => t.date).sort();
-  const coverage = coverageOf(period, ds[0] ?? '', ds[ds.length - 1] ?? '');
-  const cur = all.filter((t) => inPeriod(t, period));
-  // Only compare with the previous month if it is (nearly) complete — comparing against a few
+export function summarize(all: CategorizedTx[], period: string, opts: PeriodOptions = {}): PeriodSummary {
+  const day = opts.cycleDay;
+  const { min, max } = bounds(all, opts);
+  const coverage = coverageOf(period, min, max, day);
+  const cur = all.filter((t) => inPeriod(t.date, period, day));
+  // Only compare with the previous period if it is (nearly) complete — comparing against a few
   // days of data produces misleading "+700%" jumps.
   const candidate = period === ALL ? null : prevMonth(period);
-  const prevPeriod = candidate && coverageOf(candidate, ds[0] ?? '', ds[ds.length - 1] ?? '').days >= 20 ? candidate : null;
-  const prevTx = prevPeriod ? all.filter((t) => t.date.startsWith(prevPeriod)) : [];
+  const prevPeriod = candidate && coverageOf(candidate, min, max, day).days >= 20 ? candidate : null;
+  const prevTx = prevPeriod ? all.filter((t) => inPeriod(t.date, prevPeriod, day)) : [];
   const tt = totals(cur);
   const pt = prevTx.length ? totals(prevTx) : null;
   return {
@@ -137,9 +181,21 @@ export function summarize(all: CategorizedTx[], period: string): PeriodSummary {
   };
 }
 
-/** Monthly series for the bar chart. */
-export function monthlySeries(all: CategorizedTx[]) {
-  return monthsIn(all).map((m) => ({ month: m, ...totals(all.filter((t) => t.date.startsWith(m))) }));
+/** One row per period for the bar chart; `complete` = at least 20 days of data. */
+export function monthlySeries(all: CategorizedTx[], opts: PeriodOptions = {}) {
+  const { min, max } = bounds(all, opts);
+  return periodsIn(all, opts.cycleDay).map((k) => {
+    const s = summarize(all, k, opts);
+    return {
+      month: k,
+      income: s.income,
+      spending: s.spending,
+      invest: s.invest,
+      transfers: s.transfers,
+      net: s.net,
+      complete: coverageOf(k, min, max, opts.cycleDay).days >= 20,
+    };
+  });
 }
 
 // ---------------------------------------------------------------- insights
@@ -171,9 +227,9 @@ const SERVICES: [string, RegExp][] = [
   ['Disney+', /DISNEY/],
 ];
 
-export function insights(all: CategorizedTx[], aliases: Aliases, period: string): Insight[] {
-  const s = summarize(all, period);
-  const cur = all.filter((t) => inPeriod(t, period));
+export function insights(all: CategorizedTx[], aliases: Aliases, period: string, opts: PeriodOptions = {}): Insight[] {
+  const s = summarize(all, period, opts);
+  const cur = all.filter((t) => inPeriod(t.date, period, opts.cycleDay));
   const out: Insight[] = [];
   const months = period === ALL ? Math.max(1, s.coverage.days / 30.4) : 1;
   const perMonth = (v: number) => v / months;
@@ -182,8 +238,28 @@ export function insights(all: CategorizedTx[], aliases: Aliases, period: string)
   // overall balance
   if (s.income > 0 && s.spending + s.invest > s.income) {
     out.push({ id: 'over', level: 'warn', key: 'insOverspend', vars: { gap: s.spending + s.invest - s.income } });
-  } else if (s.income > 0 && s.savingsRate !== null && s.savingsRate > 0) {
-    out.push({ id: 'saved', level: s.savingsRate >= 0.2 ? 'good' : 'info', key: 'insSaved', vars: { pct: Math.round(s.savingsRate * 100), amt: s.income - s.spending } });
+  } else if (s.income > 0 && s.net > 0) {
+    // same number as the "left over" card: income − spending − investing
+    const rate = s.net / s.income;
+    out.push({ id: 'saved', level: rate >= 0.2 ? 'good' : 'info', key: 'insSaved', vars: { pct: Math.round(rate * 100), amt: s.net } });
+  }
+
+  // budgets (per period; "all data" has no budget meaning)
+  if (period !== ALL && opts.budgets) {
+    let okCount = 0;
+    let total = 0;
+    for (const [cat, limit] of Object.entries(opts.budgets)) {
+      if (!(limit > 0)) continue;
+      total++;
+      const st = budgetStatus(catTotal(cat), limit, s.coverage.days, s.coverage.fullDays);
+      const vars = { cat, spent: st.spent, limit, pct: Math.round(st.pct * 100), left: Math.max(0, st.left), projected: st.projected ?? st.spent };
+      const focus = { kind: 'category' as const, value: cat };
+      if (st.state === 'over') out.push({ id: `budget-over-${cat}`, level: 'warn', key: 'insBudgetOver', vars, focus });
+      else if (st.state === 'pace') out.push({ id: `budget-pace-${cat}`, level: 'warn', key: 'insBudgetPace', vars, focus });
+      else if (st.state === 'near') out.push({ id: `budget-near-${cat}`, level: 'info', key: 'insBudgetNear', vars, focus });
+      else okCount++;
+    }
+    if (total > 0 && okCount === total) out.push({ id: 'budget-ok', level: 'good', key: 'insBudgetOk', vars: { n: total } });
   }
 
   // AI + subscriptions
@@ -249,7 +325,7 @@ export function insights(all: CategorizedTx[], aliases: Aliases, period: string)
 
   // recurring price increases (look at all data, report those whose last charge is in this period)
   for (const r of detectRecurring(all, aliases)) {
-    if (r.priceIncrease && inPeriod({ date: r.lastDate } as CategorizedTx, period)) {
+    if (r.priceIncrease && inPeriod(r.lastDate, period, opts.cycleDay)) {
       out.push({ id: `price-${r.counterparty}`, level: 'warn', key: 'insPriceUp', vars: { name: r.counterparty, from: r.typicalAmount, to: r.lastAmount }, focus: { kind: 'name', value: r.counterparty } });
     }
   }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { CATEGORIES, categoryOf, type CategorizedTx, type CategoryOverrides } from '../lib/categories';
-import { ALL, defaultPeriod, insights, monthlySeries, monthsIn, summarize, type CategoryTotal, type Insight } from '../lib/summary';
+import { ALL, defaultPeriod, insights, monthlySeries, periodRange, periodsIn, summarize, type CategoryTotal, type Insight, type PeriodOptions } from '../lib/summary';
+import { budgetStatus, goalProgress, suggestBudget, suggestEmergencyFund, type Budgets, type Goal } from '../lib/budget';
 import type { Aliases } from '../lib/types';
 import { money } from '../format';
 import { useLang, useT } from '../i18n';
@@ -11,28 +12,64 @@ interface Props {
   overrides: CategoryOverrides;
   onOverride: (name: string, categoryId: string | null) => void;
   onResetOverrides: () => void;
+  cycleDay: number;
+  cycleAuto: boolean;
+  onCycleDay: (day: number) => void;
+  dataFrom?: string;
+  dataTo?: string;
+  budgets: Budgets;
+  onBudget: (categoryId: string, amount: number | null) => void;
+  goal: Goal;
+  onGoal: (g: Goal) => void;
 }
 
-const MONEY_VARS = new Set(['amt', 'year', 'gap', 'from', 'to', 'a1', 'a2', 'avg']);
+const MONEY_VARS = new Set(['amt', 'year', 'gap', 'from', 'to', 'a1', 'a2', 'avg', 'spent', 'limit', 'left', 'projected']);
 
-export default function SummaryView({ txns, aliases, overrides, onOverride, onResetOverrides }: Props) {
+export default function SummaryView(props: Props) {
+  const { txns, aliases, overrides, onOverride, onResetOverrides, cycleDay, cycleAuto, onCycleDay, dataFrom, dataTo, budgets, onBudget, goal, onGoal } = props;
   const t = useT();
   const { lang } = useLang();
-  const months = useMemo(() => monthsIn(txns), [txns]);
-  const [period, setPeriod] = useState(() => defaultPeriod(txns));
-  const p = period === ALL || months.includes(period) ? period : defaultPeriod(txns);
-  const s = useMemo(() => summarize(txns, p), [txns, p]);
-  const ins = useMemo(() => insights(txns, aliases, p), [txns, aliases, p]);
-  const series = useMemo(() => monthlySeries(txns), [txns]);
+  const opts: PeriodOptions = useMemo(() => ({ cycleDay, dataFrom, dataTo, budgets }), [cycleDay, dataFrom, dataTo, budgets]);
+  const periods = useMemo(() => periodsIn(txns, cycleDay), [txns, cycleDay]);
+  const [period, setPeriod] = useState(() => defaultPeriod(txns, opts));
+  const [periodDay, setPeriodDay] = useState(cycleDay);
+  // when the cycle day changes, the old period key means something else: go back to the default
+  const p = periodDay === cycleDay && (period === ALL || periods.includes(period)) ? period : defaultPeriod(txns, opts);
+  const pick = (k: string) => {
+    setPeriod(k);
+    setPeriodDay(cycleDay);
+  };
+  const s = useMemo(() => summarize(txns, p, opts), [txns, p, opts]);
+  const ins = useMemo(() => insights(txns, aliases, p, opts), [txns, aliases, p, opts]);
+  const series = useMemo(() => monthlySeries(txns, opts), [txns, opts]);
   const [open, setOpen] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
 
+  // per-category history over complete periods (for budget suggestions)
+  const history = useMemo(() => {
+    const h = new Map<string, number[]>();
+    const complete = series.filter((r) => r.complete).map((r) => r.month);
+    for (const k of complete) for (const c of summarize(txns, k, opts).spendCategories) h.set(c.id, [...(h.get(c.id) ?? []), c.total]);
+    return { byCat: h, spending: series.filter((r) => r.complete).map((r) => r.spending), nets: series.filter((r) => r.complete).map((r) => r.net) };
+  }, [series, txns, opts]);
+
+  const locale = lang === 'th' ? 'th-TH-u-ca-gregory' : 'en-US';
+  const fmtDay = (iso: string, withYear: boolean) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}), timeZone: 'UTC' });
   const catLabel = (id: string) => {
     const c = categoryOf(id);
     return `${c.icon} ${lang === 'th' ? c.th : c.en}`;
   };
-  const monthLabel = (m: string) =>
-    m === ALL ? t('allTime') : new Date(`${m}-15T00:00:00Z`).toLocaleDateString(lang === 'th' ? 'th-TH-u-ca-gregory' : 'en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const periodLabel = (k: string) => {
+    if (k === ALL) return t('allTime');
+    if (cycleDay === 1) return new Date(`${k}-15T00:00:00Z`).toLocaleDateString(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const r = periodRange(k, cycleDay);
+    return `${fmtDay(r.from, false)} – ${fmtDay(r.to, true)}`;
+  };
+  const shortLabel = (k: string) =>
+    cycleDay === 1
+      ? new Date(`${k}-15T00:00:00Z`).toLocaleDateString(locale, { month: 'short', timeZone: 'UTC' })
+      : fmtDay(periodRange(k, cycleDay).from, false);
 
   const renderInsight = (i: Insight) => {
     const vars: Record<string, string | number> = {};
@@ -84,14 +121,25 @@ export default function SummaryView({ txns, aliases, overrides, onOverride, onRe
       <div className="summary-head">
         <label className="period">
           {t('period')}
-          <select value={p} onChange={(e) => setPeriod(e.target.value)}>
-            {[...months].reverse().map((m) => (
-              <option key={m} value={m}>
-                {monthLabel(m)}
+          <select id="period" value={p} onChange={(e) => pick(e.target.value)}>
+            {[...periods].reverse().map((k) => (
+              <option key={k} value={k}>
+                {periodLabel(k)}
               </option>
             ))}
             <option value={ALL}>{t('allTime')}</option>
           </select>
+        </label>
+        <label className="cycle small">
+          {t('cycleDay')}
+          <select id="cycle-day" value={cycleDay} onChange={(e) => onCycleDay(Number(e.target.value))}>
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                {d === 1 ? t('cycleCalendar') : d}
+              </option>
+            ))}
+          </select>
+          {cycleAuto && cycleDay > 1 && <span className="muted">({t('cycleAutoHint')})</span>}
         </label>
         <span className="small muted">
           {p !== ALL && s.coverage.days < s.coverage.fullDays - 1 ? (
@@ -136,7 +184,7 @@ export default function SummaryView({ txns, aliases, overrides, onOverride, onRe
         <section className="card" id="cat-list">
           <h3>{t('spendTitle')}</h3>
           <p className="small muted">{t('summaryHint')}</p>
-          <CategoryList cats={s.spendCategories} catLabel={catLabel} open={open} setOpen={setOpen} highlight={highlight} hasPrev={!!s.prev} kind="spend" overrides={overrides} onOverride={onOverride} />
+          <CategoryList cats={s.spendCategories} catLabel={catLabel} open={open} setOpen={setOpen} highlight={highlight} hasPrev={!!s.prev} kind="spend" overrides={overrides} onOverride={onOverride} budgets={budgets} />
           {s.investCategory && (
             <>
               <h3>{t('investTitle')}</h3>
@@ -150,6 +198,18 @@ export default function SummaryView({ txns, aliases, overrides, onOverride, onRe
           )}
         </section>
         <div>
+          <BudgetCard
+            budgets={budgets}
+            onBudget={onBudget}
+            spentOf={(id) => s.spendCategories.find((c) => c.id === id)?.total ?? 0}
+            days={p === ALL ? 0 : s.coverage.days}
+            fullDays={p === ALL ? 0 : s.coverage.fullDays}
+            history={history.byCat}
+            current={s.spendCategories}
+            catLabel={catLabel}
+            disabled={p === ALL}
+          />
+          <GoalCard goal={goal} onGoal={onGoal} nets={history.nets} spending={history.spending} />
           <section className="card">
             <h3>{t('incomeTitle')}</h3>
             <CategoryList cats={s.incomeCategories} catLabel={catLabel} open={open} setOpen={setOpen} highlight={highlight} hasPrev={!!s.prev} kind="income" overrides={overrides} onOverride={onOverride} />
@@ -157,12 +217,147 @@ export default function SummaryView({ txns, aliases, overrides, onOverride, onRe
           {series.length > 0 && (
             <section className="card">
               <h3>{t('trendTitle')}</h3>
-              <TrendChart series={series} selected={p} onPick={setPeriod} monthLabel={monthLabel} />
+              <TrendChart series={series} selected={p} onPick={pick} label={shortLabel} />
             </section>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function BudgetCard(props: {
+  budgets: Budgets;
+  onBudget: (id: string, amount: number | null) => void;
+  spentOf: (id: string) => number;
+  days: number;
+  fullDays: number;
+  history: Map<string, number[]>;
+  current: CategoryTotal[];
+  catLabel: (id: string) => string;
+  disabled: boolean;
+}) {
+  const t = useT();
+  const { budgets, onBudget, spentOf, days, fullDays, history, current, catLabel, disabled } = props;
+  const spendCats = CATEGORIES.filter((c) => c.kind === 'spend' || c.kind === 'cash');
+  // offer the categories you actually spend on first
+  const choices = [...spendCats].sort((a, b) => (spentOf(b.id) || 0) - (spentOf(a.id) || 0)).filter((c) => !(budgets[c.id] > 0));
+  const [cat, setCat] = useState('');
+  const [amount, setAmount] = useState('');
+  const suggestion = cat ? suggestBudget(history.get(cat) ?? (current.find((c) => c.id === cat) ? [current.find((c) => c.id === cat)!.total] : [])) : null;
+  const add = () => {
+    const v = Number(amount || suggestion);
+    if (cat && v > 0) onBudget(cat, Math.round(v * 100) / 100);
+    setCat('');
+    setAmount('');
+  };
+  const entries = Object.entries(budgets).filter(([, v]) => v > 0);
+  return (
+    <section className="card" id="budgets">
+      <h3>{t('budgetTitle')}</h3>
+      {entries.length === 0 && <p className="small muted">{t('budgetEmpty')}</p>}
+      <ul className="budgets">
+        {entries.map(([id, limit]) => {
+          const st = budgetStatus(spentOf(id), limit, days, fullDays);
+          const pct = Math.min(100, st.pct * 100);
+          return (
+            <li key={id} className={`budget ${disabled ? '' : st.state}`}>
+              <div className="budget-top">
+                <span>{catLabel(id)}</span>
+                <span className="num small">{t('budgetUsed', { spent: money(st.spent), limit: money(limit) })}</span>
+              </div>
+              <div className="budget-bar" role="progressbar" aria-valuenow={Math.round(st.pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ width: `${pct}%` }} />
+                {st.projected !== null && st.projected > st.spent && (
+                  <i style={{ left: `${pct}%`, width: `${Math.max(0, Math.min(100, (st.projected / limit) * 100) - pct)}%` }} />
+                )}
+              </div>
+              <div className="budget-foot small">
+                <span className={st.state === 'over' ? 'out' : st.state === 'ok' ? 'muted' : 'warn'}>
+                  {st.state === 'over' ? t('budgetOverBy', { v: money(-st.left) }) : t('budgetLeft', { v: money(st.left) })}
+                  {st.projected !== null && st.state !== 'over' && <> · {t('budgetProjected', { v: money(st.projected) })}</>}
+                </span>
+                <button className="link small" onClick={() => onBudget(id, null)}>
+                  {t('remove')}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="budget-add">
+        <select id="budget-cat" aria-label={t('budgetCat')} value={cat} onChange={(e) => setCat(e.target.value)}>
+          <option value="">{t('budgetCat')}…</option>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>
+              {catLabel(c.id)}
+            </option>
+          ))}
+        </select>
+        <input
+          id="budget-amount"
+          type="number"
+          min={0}
+          step={10}
+          inputMode="decimal"
+          aria-label={t('budgetAmount')}
+          placeholder={suggestion ? t('suggested', { v: money(suggestion) }) : t('budgetAmount')}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+        />
+        <button className="primary" disabled={!cat || !(Number(amount) > 0 || (suggestion ?? 0) > 0)} onClick={add}>
+          {t('addBudget')}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function GoalCard({ goal, onGoal, nets, spending }: { goal: Goal; onGoal: (g: Goal) => void; nets: number[]; spending: number[] }) {
+  const t = useT();
+  const g = goalProgress(goal, nets);
+  const suggestion = suggestEmergencyFund(spending);
+  const num = (v: string) => Math.max(0, Number(v) || 0);
+  return (
+    <section className="card" id="goal">
+      <h3>{t('goalTitle')}</h3>
+      <div className="goal-inputs">
+        <label className="field">
+          <span>{t('goalTarget')}</span>
+          <input id="goal-target" type="number" min={0} step={100} inputMode="decimal" value={goal.target || ''} placeholder={suggestion ? String(suggestion) : '10000'} onChange={(e) => onGoal({ ...goal, target: num(e.target.value) })} />
+        </label>
+        <label className="field">
+          <span>{t('goalCurrent')}</span>
+          <input id="goal-current" type="number" min={0} step={100} inputMode="decimal" value={goal.current || ''} placeholder="0" onChange={(e) => onGoal({ ...goal, current: num(e.target.value) })} />
+        </label>
+      </div>
+      {suggestion !== null && goal.target !== suggestion && (
+        <button className="link small" onClick={() => onGoal({ ...goal, target: suggestion })}>
+          {t('goalSuggest', { v: money(suggestion) })}
+        </button>
+      )}
+      {goal.target > 0 && (
+        <>
+          <div className="goal-bar" role="progressbar" aria-valuenow={Math.round(g.pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${g.pct * 100}%` }} />
+          </div>
+          <p className="small">
+            {g.reached ? t('goalReached') : t('goalProgress', { pct: Math.round(g.pct * 100), v: money(g.remaining) })}
+          </p>
+          {!g.reached && (
+            <p className={`small ${g.monthlySaving !== null && g.monthlySaving <= 0 ? 'warn' : 'muted'}`}>
+              {g.monthlySaving === null
+                ? t('goalNoData')
+                : g.monthsToGoal !== null
+                  ? t('goalEta', { v: money(g.monthlySaving), n: g.monthsToGoal })
+                  : t('goalNotSaving', { v: money(g.monthlySaving) })}
+            </p>
+          )}
+        </>
+      )}
+      <p className="small muted">{t('goalNote')}</p>
+    </section>
   );
 }
 
@@ -177,10 +372,11 @@ function CategoryList(props: {
   overrides: CategoryOverrides;
   onOverride: (name: string, id: string | null) => void;
   noShare?: boolean;
+  budgets?: Budgets;
 }) {
   const t = useT();
   const { lang } = useLang();
-  const { cats, catLabel, open, setOpen, highlight, hasPrev, kind, overrides, onOverride, noShare } = props;
+  const { cats, catLabel, open, setOpen, highlight, hasPrev, kind, overrides, onOverride, noShare, budgets } = props;
   const max = Math.max(1, ...cats.map((c) => Math.abs(c.total)));
   const choices = CATEGORIES.filter((c) => (kind === 'income' ? c.kind === 'income' : c.kind !== 'income'));
   if (!cats.length) return <p className="muted">{t('nothing')}</p>;
@@ -193,7 +389,10 @@ function CategoryList(props: {
         return (
           <li key={c.id} className={isOpen ? 'open' : ''}>
             <button className="cat-row" onClick={() => setOpen(isOpen ? null : c.id)} aria-expanded={isOpen}>
-              <span className="cat-name">{catLabel(c.id)}</span>
+              <span className="cat-name">
+                {catLabel(c.id)}
+                {budgets?.[c.id] ? <span className={`budget-chip ${c.total > budgets[c.id] ? 'over' : ''}`}>🎯 {money(budgets[c.id])}</span> : null}
+              </span>
               <span className="cat-amt">
                 {money(c.total)}
                 {!noShare && <span className="small muted"> · {Math.round(c.share * 100)}%</span>}
@@ -240,12 +439,12 @@ function TrendChart({
   series,
   selected,
   onPick,
-  monthLabel,
+  label,
 }: {
-  series: { month: string; income: number; spending: number; invest: number }[];
+  series: { month: string; income: number; spending: number; invest: number; complete: boolean }[];
   selected: string;
   onPick: (m: string) => void;
-  monthLabel: (m: string) => string;
+  label: (m: string) => string;
 }) {
   const t = useT();
   const rows = series.slice(-12);
@@ -276,7 +475,8 @@ function TrendChart({
                 </rect>
               )}
               <text x={x} y={H - 6} textAnchor="middle" className="trend-label">
-                {monthLabel(r.month).split(' ')[0].slice(0, 6)}
+                {label(r.month)}
+                {!r.complete && '*'}
               </text>
             </g>
           );

@@ -1,5 +1,5 @@
 import { autoCategory, categorize, type CategoryOverrides } from './categories';
-import { ALL, defaultPeriod, insights, monthlySeries, summarize } from './summary';
+import { ALL, defaultPeriod, insights, monthlySeries, periodKeyOf, periodRange, periodsIn, summarize } from './summary';
 import { normalizeCounterparty } from './normalize';
 import type { Transaction } from './types';
 
@@ -137,5 +137,42 @@ describe('insights', () => {
   it('warns when spending + investing exceeds income', () => {
     const t = categorize([tx('2026-10-01', 100, 'Remote Online Deposit 1'), tx('2026-10-02', -150, 'H-E-B #1 HOUSTON TX')], {}, {});
     expect(insights(t, {}, '2026-10')[0]).toMatchObject({ id: 'over', level: 'warn' });
+  });
+});
+
+describe('statement cycles', () => {
+  it('maps dates to cycles that start on a given day', () => {
+    expect(periodRange('2026-09', 24)).toEqual({ from: '2026-09-24', to: '2026-10-23' });
+    expect(periodRange('2026-12', 24)).toEqual({ from: '2026-12-24', to: '2027-01-23' });
+    expect(periodRange('2026-02', 1)).toEqual({ from: '2026-02-01', to: '2026-02-28' });
+    expect(periodKeyOf('2026-10-22', 24)).toBe('2026-09');
+    expect(periodKeyOf('2026-10-24', 24)).toBe('2026-10');
+    expect(periodKeyOf('2026-01-05', 24)).toBe('2025-12');
+    expect(periodsIn(month, 24)).toEqual(['2026-09']);
+  });
+  it('a whole statement becomes one complete period', () => {
+    const opts = { cycleDay: 24, dataFrom: '2026-09-24', dataTo: '2026-10-23' };
+    expect(defaultPeriod(ct, opts)).toBe('2026-09');
+    const s = summarize(ct, '2026-09', opts);
+    expect(s.coverage).toMatchObject({ from: '2026-09-24', to: '2026-10-23', days: 30, fullDays: 30 });
+    expect(s.income).toBe(1120 + 1820 + 100);
+    expect(monthlySeries(ct, opts)).toEqual([expect.objectContaining({ month: '2026-09', complete: true })]);
+  });
+});
+
+describe('budget insights', () => {
+  it('warns when over budget, notes when all are fine', () => {
+    const over = insights(ct, {}, '2026-10', { budgets: { ai: 200 } });
+    expect(over.find((i) => i.id === 'budget-over-ai')).toMatchObject({ level: 'warn', vars: { limit: 200 } });
+    const fine = insights(ct, {}, '2026-10', { budgets: { ai: 1000, grocery: 300 } });
+    expect(fine.find((i) => i.id === 'budget-ok')).toMatchObject({ level: 'good', vars: { n: 2 } });
+  });
+});
+
+describe('saved insight', () => {
+  it('uses the same number as the "left over" card (after investing)', () => {
+    const s = summarize(ct, ALL);
+    const i = insights(ct, {}, ALL).find((x) => x.id === 'saved')!;
+    expect(i.vars.amt).toBeCloseTo(s.net, 2);
   });
 });

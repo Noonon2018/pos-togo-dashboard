@@ -29,3 +29,15 @@ export const saveAliases = (a: Aliases) => write(ALIASES, a);
 const CATS = 'moneyflow.categories.v1';
 export const loadCategoryOverrides = () => read<Record<string, string>>(CATS, {});
 export const saveCategoryOverrides = (o: Record<string, string>) => write(CATS, o);
+
+// Budgets, emergency-fund goal and statement-cycle day. Small settings only; still no transactions.
+const BUDGETS = 'moneyflow.budgets.v1';
+const GOAL = 'moneyflow.goal.v1';
+const CYCLE = 'moneyflow.cycle.v1';
+export const loadBudgets = () => read<Record<string, number>>(BUDGETS, {});
+export const saveBudgets = (b: Record<string, number>) => write(BUDGETS, b);
+export const loadGoal = () => read<{ target: number; current: number }>(GOAL, { target: 0, current: 0 });
+export const saveGoal = (g: { target: number; current: number }) => write(GOAL, g);
+/** manual = the user picked the day themselves (don't auto-change it from PDFs any more) */
+export const loadCycle = () => read<{ day: number; manual: boolean }>(CYCLE, { day: 1, manual: false });
+export const saveCycle = (c: { day: number; manual: boolean }) => write(CYCLE, c);
