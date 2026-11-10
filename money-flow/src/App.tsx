@@ -3,12 +3,14 @@ import GraphView, { type GraphHandle, type Selection } from './components/GraphV
 import ImportDialog, { type PendingFile } from './components/ImportDialog';
 import SidePanel from './components/SidePanel';
 import HelpDialog from './components/HelpDialog';
+import SummaryView from './components/SummaryView';
+import { categorize } from './lib/categories';
 import { useLang, useT } from './i18n';
 import { buildGraph, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
-import { loadAliases, loadProfiles, saveAliases, saveProfiles } from './lib/storage';
+import { loadAliases, loadCategoryOverrides, loadProfiles, saveAliases, saveCategoryOverrides, saveProfiles } from './lib/storage';
 import { DEFAULT_FILTERS, type BankProfile, type Filters, type Transaction } from './lib/types';
 
 const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
@@ -23,6 +25,8 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [dragging, setDragging] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [view, setView] = useState<'summary' | 'graph'>('summary');
+  const [overrides, setOverrides] = useState(loadCategoryOverrides);
   const t = useT();
   const { lang, setLang } = useLang();
   const graphRef = useRef<GraphHandle>(null);
@@ -30,10 +34,12 @@ export default function App() {
 
   useEffect(() => saveAliases(aliases), [aliases]);
   useEffect(() => saveProfiles(profiles), [profiles]);
+  useEffect(() => saveCategoryOverrides(overrides), [overrides]);
 
   const accounts = useMemo(() => [...new Set(txns.map((t) => t.account))].sort(), [txns]);
   const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
   const graph = useMemo(() => buildGraph(txns, aliases, filters), [txns, aliases, filters]);
+  const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
   const dateBounds = useMemo(() => {
     const ds = txns.map((t) => t.date).sort();
     return { min: ds[0] ?? '', max: ds[ds.length - 1] ?? '' };
@@ -151,9 +157,13 @@ export default function App() {
               {t('stats', { t: txns.length, a: accounts.length, n: graph.nodes.length })}
             </span>
             <span className="spacer" />
-            <button onClick={() => graphRef.current?.fit()}>{t('fit')}</button>
-            <button onClick={() => graphRef.current?.relayout()}>{t('relayout')}</button>
-            <button onClick={exportPng}>{t('png')}</button>
+            {view === 'graph' && (
+              <>
+                <button onClick={() => graphRef.current?.fit()}>{t('fit')}</button>
+                <button onClick={() => graphRef.current?.relayout()}>{t('relayout')}</button>
+                <button onClick={exportPng}>{t('png')}</button>
+              </>
+            )}
             <button onClick={() => download(`money-flow-summary-${stamp}.csv`, summaryCsv(filtered, aliases))}>{t('summaryCsv')}</button>
             <button onClick={() => download(`money-flow-transactions-${stamp}.csv`, transactionsCsv(filtered, aliases))}>{t('txnsCsv')}</button>
             <button onClick={resetNames} title={t('resetNamesTitle')}>
@@ -167,6 +177,17 @@ export default function App() {
       </header>
 
       {txns.length > 0 && (
+        <nav className="views">
+          <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
+            {t('viewSummary')}
+          </button>
+          <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
+            {t('viewGraph')}
+          </button>
+        </nav>
+      )}
+
+      {txns.length > 0 && view === 'graph' && (
         <div className="filters">
           <label>
             {t('from')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />
@@ -238,6 +259,23 @@ export default function App() {
               <li>{t('empty3')}</li>
             </ul>
           </div>
+        </main>
+      ) : view === 'summary' ? (
+        <main className="summary-main">
+          <SummaryView
+            txns={categorized}
+            aliases={aliases}
+            overrides={overrides}
+            onOverride={(name, id) =>
+              setOverrides((o) => {
+                const next = { ...o };
+                if (id) next[name] = id;
+                else delete next[name];
+                return next;
+              })
+            }
+            onResetOverrides={() => setOverrides({})}
+          />
         </main>
       ) : (
         <main className="workspace">

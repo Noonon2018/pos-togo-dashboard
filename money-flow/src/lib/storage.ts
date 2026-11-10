@@ -25,3 +25,7 @@ export const loadProfiles = () => read<BankProfile[]>(PROFILES, []);
 export const saveProfiles = (p: BankProfile[]) => write(PROFILES, p);
 export const loadAliases = () => read<Aliases>(ALIASES, {});
 export const saveAliases = (a: Aliases) => write(ALIASES, a);
+
+const CATS = 'moneyflow.categories.v1';
+export const loadCategoryOverrides = () => read<Record<string, string>>(CATS, {});
+export const saveCategoryOverrides = (o: Record<string, string>) => write(CATS, o);
