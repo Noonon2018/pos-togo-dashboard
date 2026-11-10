@@ -1,0 +1,62 @@
+/** One normalized transaction. amount > 0 = money INTO the account, < 0 = money OUT. */
+export interface Transaction {
+  id: string;
+  /** Name of my account this row came from (e.g. "Chase Checking"). */
+  account: string;
+  /** ISO date YYYY-MM-DD */
+  date: string;
+  description: string;
+  amount: number;
+  /** Auto-normalized counterparty key (before user aliases). */
+  counterparty: string;
+  /** Source file name, for traceability. */
+  source: string;
+}
+
+export type AmountMode = 'signed' | 'debitCredit';
+export type DateFormat = 'auto' | 'MDY' | 'DMY' | 'YMD';
+
+export interface ColumnMapping {
+  hasHeader: boolean;
+  date: string;
+  description: string;
+  amountMode: AmountMode;
+  /** signed mode */
+  amount?: string;
+  /** debitCredit mode */
+  debit?: string;
+  credit?: string;
+  /** Flip sign (credit-card exports often show purchases as positive). */
+  invert: boolean;
+  dateFormat: DateFormat;
+}
+
+export interface BankProfile {
+  name: string;
+  /** Header signature used to auto-detect this bank on future uploads. */
+  signature: string;
+  mapping: ColumnMapping;
+}
+
+/** user alias map: normalized counterparty key -> display name (or an account name) */
+export type Aliases = Record<string, string>;
+
+export type Direction = 'all' | 'in' | 'out';
+
+export interface Filters {
+  from?: string;
+  to?: string;
+  minAmount: number;
+  direction: Direction;
+  /** Keep only the N largest counterparties by volume (0 = no limit). */
+  topN: number;
+  /** Restrict to these accounts (empty = all). */
+  accounts: string[];
+}
+
+export const DEFAULT_FILTERS: Filters = {
+  minAmount: 0,
+  direction: 'all',
+  topN: 40,
+  accounts: [],
+};

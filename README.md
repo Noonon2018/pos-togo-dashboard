@@ -35,3 +35,7 @@
 
 ---
 สร้างด้วย React + Vite | Responsive | i18n-ready | LocalStorage only
+
+## Money Flow Analyzer
+
+เครื่องมือวิเคราะห์เส้นทางเงินจาก statement ธนาคาร (แยกโปรเจกต์ ไม่เกี่ยวกับ dashboard) อยู่ในโฟลเดอร์ [`money-flow/`](money-flow/README.md)
