@@ -4,7 +4,8 @@ import ImportDialog, { type PendingFile } from './components/ImportDialog';
 import SidePanel from './components/SidePanel';
 import HelpDialog from './components/HelpDialog';
 import SummaryView from './components/SummaryView';
-import { categorize } from './lib/categories';
+import { categorize, categoryOf } from './lib/categories';
+import { mergeKind, mergeWarning } from './lib/mergeCheck';
 import { useLang, useT } from './i18n';
 import { buildGraph, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
@@ -24,7 +25,7 @@ import {
   saveGoal,
   saveProfiles,
 } from './lib/storage';
-import { DEFAULT_FILTERS, type BankProfile, type Filters, type Transaction } from './lib/types';
+import { DEFAULT_FILTERS, type Aliases, type BankProfile, type Filters, type Transaction } from './lib/types';
 
 const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
 
@@ -44,6 +45,8 @@ export default function App() {
   const [goal, setGoal] = useState(loadGoal);
   const [cycle, setCycle] = useState(loadCycle);
   /** statement periods of imported PDFs, so a statement that ends without a transaction still counts as complete */
+  /** last change to names, so it can be undone */
+  const [undo, setUndo] = useState<{ msg: string; prev: Aliases } | null>(null);
   const [stmtRange, setStmtRange] = useState<{ from?: string; to?: string }>({});
   const t = useT();
   const { lang, setLang } = useLang();
@@ -107,6 +110,7 @@ export default function App() {
       const fresh = newTx.filter((t) => !ids.has(t.id));
       const skipped = newTx.length - fresh.length;
       setStatus(t('imported', { n: fresh.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
+      setUndo(null);
       return [...cur, ...fresh];
     });
     const info = file.pdf?.info;
@@ -123,8 +127,44 @@ export default function App() {
     setQueue((q) => q.slice(1));
   };
 
-  const rename = (from: string, to: string) =>
-    setAliases((a) => renameCounterparty(a, new Set(txns.map((t) => t.counterparty)), from, to));
+  // main category of every current name (used to warn before risky merges)
+  const nameCategory = useMemo(() => {
+    const votes = new Map<string, Map<string, number>>();
+    for (const t of categorized) {
+      const v = votes.get(t.name) ?? votes.set(t.name, new Map()).get(t.name)!;
+      v.set(t.category, (v.get(t.category) ?? 0) + Math.abs(t.amount));
+    }
+    const out = new Map<string, string>();
+    for (const [n, v] of votes) out.set(n, [...v.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+    return out;
+  }, [categorized]);
+
+  const changeNames = (next: Aliases, msg: string) => {
+    setUndo({ msg, prev: aliases });
+    setAliases(next);
+    setStatus('');
+  };
+
+  /** Merge/rename one or more names into `to`. Returns false if the user cancelled. */
+  const rename = (froms: string[], to: string): boolean => {
+    const target = to.trim();
+    const sources = froms.filter((f) => f !== target);
+    if (!target || !sources.length) return false;
+    const catName = (id: string | null) => (id ? `${categoryOf(id).icon} ${lang === 'th' ? categoryOf(id).th : categoryOf(id).en}` : '');
+    const w = mergeWarning(sources, target, (n) => nameCategory.get(n) ?? null, accounts);
+    if (w.kind === 'crossCategory') {
+      const list = w.items.map((i) => `• ${i.name} (${catName(i.category)})`).join('\n');
+      if (!confirm(t('mergeConfirmCross', { list, to: target, toCat: w.targetCategory ? ` (${catName(w.targetCategory)})` : '' }))) return false;
+    } else if (w.kind === 'toAccount') {
+      if (!confirm(t('mergeConfirmAccount', { list: w.names.join(', '), to: target }))) return false;
+    }
+    const kind = mergeKind(target, new Set(nameCategory.keys()), accounts);
+    const raw = new Set(txns.map((x) => x.counterparty));
+    const next = sources.reduce((a, f) => renameCounterparty(a, raw, f, target), aliases);
+    const from = sources.join(', ');
+    changeNames(next, t(kind === 'merge' ? 'toastMerged' : kind === 'account' ? 'toastAccount' : 'toastRenamed', { from, to: target }));
+    return true;
+  };
 
   const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
   const stamp = new Date().toISOString().slice(0, 10);
@@ -144,7 +184,7 @@ export default function App() {
   };
 
   const resetNames = () => {
-    if (confirm(t('confirmResetNames'))) setAliases({});
+    if (confirm(t('confirmResetNames'))) changeNames({}, t('toastNamesReset'));
   };
 
   return (
@@ -267,7 +307,25 @@ export default function App() {
         </div>
       )}
 
-      {status && (
+      {undo && (
+        <div className="status undo-bar" role="status">
+          <span>✓ {undo.msg}</span>
+          <button
+            className="undo-btn"
+            onClick={() => {
+              setAliases(undo.prev);
+              setUndo(null);
+              setStatus(t('undone'));
+            }}
+          >
+            ↶ {t('undo')}
+          </button>
+          <button className="link small" aria-label={t('close')} onClick={() => setUndo(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+      {status && !undo && (
         <div className="status" onClick={() => setStatus('')}>
           {status}
         </div>
@@ -336,7 +394,7 @@ export default function App() {
             selection={selection}
             onSelect={setSelection}
             onRename={rename}
-            onUnmerge={(r) => setAliases((a) => unmerge(a, r))}
+            onUnmerge={(r) => changeNames(unmerge(aliases, r), t('toastUnmerged', { name: r }))}
           />
           <div className="legend">
             <span>

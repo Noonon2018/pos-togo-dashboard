@@ -13,6 +13,7 @@ import {
 import type { Aliases, Transaction } from '../lib/types';
 import { money } from '../format';
 import { useT } from '../i18n';
+import { mergeKind } from '../lib/mergeCheck';
 import type { Selection } from './GraphView';
 
 interface Props {
@@ -22,7 +23,8 @@ interface Props {
   accounts: string[];
   selection: Selection | null;
   onSelect: (s: Selection | null) => void;
-  onRename: (from: string, to: string) => void;
+  /** merge/rename; returns false if the user cancelled */
+  onRename: (from: string[], to: string) => boolean;
   onUnmerge: (rawKey: string) => void;
 }
 
@@ -273,7 +275,7 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
     .filter((c) => c.name.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.inflow + b.outflow - (a.inflow + a.outflow));
   const merge = () => {
-    for (const p of picked) onRename(p, target);
+    if (!onRename(picked, target)) return;
     setPicked([]);
     setTarget('');
   };
@@ -291,6 +293,7 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
           </button>
         </div>
       )}
+      {picked.length > 0 && target.trim() && <MergeHint to={target} txns={txns} aliases={aliases} accounts={accounts} />}
       <datalist id="names-list">
         {accounts.map((a) => (
           <option key={`a-${a}`} value={a}>
@@ -418,14 +421,16 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
               className="primary"
               disabled={!newName.trim()}
               onClick={() => {
-                onRename(node.label, newName.trim());
-                onSelect(accounts.includes(newName.trim()) ? null : nodeOf(newName.trim()));
+                const to = newName.trim();
+                if (!onRename([node.label], to)) return;
+                onSelect(accounts.some((a) => a.toUpperCase() === to.toUpperCase()) ? null : nodeOf(to));
                 setNewName('');
               }}
             >
               {tr('apply')}
             </button>
           </div>
+          {newName.trim() && <MergeHint to={newName} txns={txns} aliases={aliases} accounts={accounts} />}
           {raws.some((r) => r !== node.label) && (
             <div className="raws">
               <span className="muted small">{tr('mergedFrom')}</span>
@@ -491,5 +496,18 @@ function TxList({ txns, aliases, compact }: { txns: Transaction[]; aliases: Alia
       </table>
       {sorted.length > limit && <button onClick={() => setLimit((l) => l + 200)}>{tr('showMore', { n: sorted.length - limit })}</button>}
     </>
+  );
+}
+
+/** Says, before you press the button, whether this is a rename, a merge, or a transfer to your own account. */
+function MergeHint({ to, txns, aliases, accounts }: { to: string; txns: Transaction[]; aliases: Aliases; accounts: string[] }) {
+  const tr = useT();
+  const names = useMemo(() => new Set(txns.map((t) => counterpartyName(t, aliases))), [txns, aliases]);
+  const target = to.trim();
+  const kind = mergeKind(target, names, accounts);
+  return (
+    <p className={`merge-hint small ${kind}`}>
+      {kind === 'merge' ? '🔗 ' + tr('hintMerge', { to: target }) : kind === 'account' ? '🔁 ' + tr('hintAccount', { to: target }) : '✏️ ' + tr('hintRename', { to: target })}
+    </p>
   );
 }
