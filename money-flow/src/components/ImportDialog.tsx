@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react';
-import { applyMapping, guessMapping, headerSignature, parseCsvText } from '../lib/csv';
+import { applyMapping, guessMapping, headerSignature, parseCsvText, type ParsedCsv } from '../lib/csv';
+import type { StatementResult } from '../lib/pdfStatement';
 import type { BankProfile, ColumnMapping, Transaction } from '../lib/types';
 import { money } from '../format';
 
 export interface PendingFile {
   name: string;
   text: string;
+  /** Set for PDF statements: rows already extracted, plus the reconciliation check. */
+  pdf?: StatementResult;
 }
 
 interface Props {
@@ -26,6 +29,10 @@ const accountFromFile = (name: string) =>
 /** Column-mapping step for one CSV. Auto-applies a saved bank profile when the header matches. */
 export default function ImportDialog({ file, remaining, profiles, accounts, onImport, onSkip }: Props) {
   const initial = useMemo(() => {
+    if (file.pdf) {
+      const p = file.pdf.parsed;
+      return { mapping: { ...guessMapping(p.headers, true, p.rows), dateFormat: 'YMD' as const }, profileName: '' };
+    }
     const withHeader = parseCsvText(file.text, true);
     const sig = headerSignature(withHeader.headers);
     const prof = profiles.find((p) => p.signature === sig);
@@ -37,11 +44,14 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
   }, [file, profiles]);
 
   const [mapping, setMapping] = useState<ColumnMapping>(initial.mapping);
-  const [account, setAccount] = useState(accountFromFile(file.name));
+  const [account, setAccount] = useState(file.pdf?.suggestedAccount || accountFromFile(file.name));
   const [profileName, setProfileName] = useState(initial.profileName || accountFromFile(file.name));
-  const [saveProfile, setSaveProfile] = useState(!initial.profileName);
+  const [saveProfile, setSaveProfile] = useState(!initial.profileName && !file.pdf);
 
-  const parsed = useMemo(() => parseCsvText(file.text, mapping.hasHeader), [file.text, mapping.hasHeader]);
+  const parsed: ParsedCsv = useMemo(
+    () => file.pdf?.parsed ?? parseCsvText(file.text, mapping.hasHeader),
+    [file.pdf, file.text, mapping.hasHeader],
+  );
   const result = useMemo(
     () => applyMapping(parsed, mapping, account.trim() || 'Account', file.name),
     [parsed, mapping, account, file.name],
@@ -104,10 +114,14 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
               ))}
             </datalist>
           </label>
-          <label className="field check">
-            <input type="checkbox" checked={mapping.hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
-            <span>First row is a header</span>
-          </label>
+          {file.pdf ? (
+            <PdfCheck pdf={file.pdf} />
+          ) : (
+            <label className="field check">
+              <input type="checkbox" checked={mapping.hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
+              <span>First row is a header</span>
+            </label>
+          )}
           {colSelect('Date', mapping.date, (v) => set({ date: v }))}
           <label className="field">
             <span>Date format</span>
@@ -195,6 +209,10 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
         </div>
 
         <footer className="modal-foot">
+          {file.pdf && (
+            <span className="muted small">Same account name for every month = statements are combined (overlaps are skipped).</span>
+          )}
+          {!file.pdf && <>
           <label className="field check">
             <input type="checkbox" checked={saveProfile} onChange={(e) => setSaveProfile(e.target.checked)} />
             <span>Remember this layout as bank</span>
@@ -206,6 +224,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
             disabled={!saveProfile}
             onChange={(e) => setProfileName(e.target.value)}
           />
+          </>}
           <span className="spacer" />
           <button onClick={onSkip}>Skip file</button>
           <button className="primary" disabled={!!fatal || result.transactions.length === 0} onClick={doImport}>
@@ -213,6 +232,29 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
           </button>
         </footer>
       </div>
+    </div>
+  );
+}
+
+function PdfCheck({ pdf }: { pdf: StatementResult }) {
+  const { info, reconcileDiff, balanceMismatches, hasBalance } = pdf;
+  const ok = reconcileDiff === 0 && balanceMismatches === 0;
+  return (
+    <div className={`pdf-check ${ok ? 'ok' : 'bad'}`}>
+      <b>{ok ? '✓ PDF reconciles' : reconcileDiff === null ? 'PDF: no balance totals found' : '⚠ PDF does not reconcile'}</b>
+      {info.periodStart && (
+        <div className="small">
+          {info.periodStart} → {info.periodEnd}
+        </div>
+      )}
+      {info.beginning !== null && info.ending !== null && (
+        <div className="small">
+          Beginning {money(info.beginning)} → ending {money(info.ending)}
+          {reconcileDiff !== null && reconcileDiff !== 0 && <> · off by {money(reconcileDiff)}</>}
+        </div>
+      )}
+      {balanceMismatches > 0 && <div className="small">{balanceMismatches} row(s) don't match the printed balance — check them below.</div>}
+      {!hasBalance && <div className="small">No balance column (credit card?). If purchases show green, tick “Flip sign”.</div>}
     </div>
   );
 }

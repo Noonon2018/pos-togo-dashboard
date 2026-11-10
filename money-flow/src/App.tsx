@@ -3,6 +3,7 @@ import GraphView, { type GraphHandle, type Selection } from './components/GraphV
 import ImportDialog, { type PendingFile } from './components/ImportDialog';
 import SidePanel from './components/SidePanel';
 import { buildGraph, filterTransactions } from './lib/aggregate';
+import { parseStatementLines } from './lib/pdfStatement';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
 import { loadAliases, loadProfiles, saveAliases, saveProfiles } from './lib/storage';
@@ -34,10 +35,30 @@ export default function App() {
   }, [txns]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
-    const list = [...files].filter((f) => /\.csv$/i.test(f.name) || f.type.includes('csv') || f.type === 'text/plain');
-    const read = await Promise.all(list.map(async (f) => ({ name: f.name, text: await f.text() })));
+    const all = [...files];
+    const csvs = all.filter((f) => /\.(csv|txt)$/i.test(f.name) || f.type.includes('csv'));
+    const pdfs = all.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    const read: PendingFile[] = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
+    const problems: string[] = [];
+    if (pdfs.length) {
+      setStatus(`Reading ${pdfs.length} PDF(s)…`);
+      const { pdfToLines } = await import('./lib/pdfText');
+      for (const f of pdfs) {
+        try {
+          const pdf = parseStatementLines(await pdfToLines(await f.arrayBuffer()));
+          if (pdf.parsed.rows.length) read.push({ name: f.name, text: '', pdf });
+          else problems.push(`${f.name}: no transactions found (scanned image PDF? — download CSV instead)`);
+        } catch (e) {
+          problems.push(`${f.name}: could not read PDF (${e instanceof Error ? e.message : 'error'})`);
+        }
+      }
+    }
+    // oldest statement first so the account name from the first one is reused for the rest
+    read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
-    else setStatus('Only .csv files are supported — export CSV from your bank website.');
+    if (problems.length) setStatus(problems.join(' · '));
+    else if (!read.length) setStatus('Unsupported file — use CSV or PDF statements.');
+    else if (pdfs.length) setStatus('');
   }, []);
 
   const loadSamples = async () => {
@@ -102,12 +123,12 @@ export default function App() {
       <header className="topbar">
         <h1>Money Flow</h1>
         <button className="primary" onClick={() => fileInput.current?.click()}>
-          + Add CSV
+          + Add CSV / PDF
         </button>
         <input
           ref={fileInput}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.pdf,text/csv,application/pdf"
           multiple
           hidden
           onChange={(e) => {
@@ -195,7 +216,7 @@ export default function App() {
           <div className="empty-card">
             <h2>Map where your money goes</h2>
             <p>
-              Drop one or more bank / credit-card <b>CSV exports</b> here (or click <b>+ Add CSV</b>). Each file is one account; add several
+              Drop bank / credit-card <b>CSV exports or PDF statements</b> here — several months at once is fine (or click <b>+ Add CSV / PDF</b>). Each file is one account; add several
               to see transfers between your own accounts.
             </p>
             <ul>

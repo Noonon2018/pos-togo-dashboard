@@ -134,3 +134,7 @@ tr.clickable:hover { background: #f9fafb; }
   .legend { display: none; }
   .grid-form { grid-template-columns: 1fr; }
 }
+
+.pdf-check { border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.pdf-check.ok { background: #ecfdf5; color: #065f46; }
+.pdf-check.bad { background: #fffbeb; color: #92400e; }
