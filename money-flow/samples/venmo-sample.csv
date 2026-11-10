@@ -1,0 +1,16 @@
+Account Statement - (@Jane-Doe-42) ,,,,,,,,,,,,,,,,,,,,
+Account Activity,,,,,,,,,,,,,,,,,,,,
+,ID,Datetime,Type,Status,Note,From,To,Amount (total),Amount (tip),Amount (tax),Amount (fee),Tax Rate,Tax Exempt,Funding Source,Destination,Beginning Balance,Ending Balance,Statement Period Venmo Fees,Terminal Location,Year to Date Venmo Fees
+,,,,,,,,,,,,,,,,$120.00,,,,
+,3801234567890123401,2026-08-03T19:22:10,Payment,Complete,🍜 dinner split,Jane Doe,Somchai K,- $32.50,,0,,0,,Venmo balance,,,,,Venmo,
+,3801234567890123402,2026-08-09T11:05:44,Payment,Complete,rent share Aug,Jane Doe,Narin Property Mgmt,- $650.00,,0,,0,,Chase Checking,,,,,Venmo,
+,3801234567890123403,2026-08-15T08:41:02,Charge,Complete,concert tickets,Jane Doe,Pranee S,+ $85.00,,0,,0,,,Venmo balance,,,,Venmo,
+,3801234567890123404,2026-08-20T21:13:55,Payment,Complete,🚕 uber back,Somchai K,Jane Doe,+ $18.00,,0,,0,,,Venmo balance,,,,Venmo,
+,3801234567890123405,2026-09-03T19:02:31,Payment,Complete,🍜 dinner split,Jane Doe,Somchai K,- $28.75,,0,,0,,Venmo balance,,,,,Venmo,
+,3801234567890123406,2026-09-09T10:58:19,Payment,Complete,rent share Sep,Jane Doe,Narin Property Mgmt,- $650.00,,0,,0,,Chase Checking,,,,,Venmo,
+,3801234567890123407,2026-09-12T16:30:00,Standard Transfer,Issued,,,,- $50.00,,,0,,,,Chase Checking,,,,Venmo,
+,3801234567890123408,2026-10-03T19:10:05,Payment,Complete,🍜 dinner split,Jane Doe,Somchai K,- $31.20,,0,,0,,Venmo balance,,,,,Venmo,
+,3801234567890123409,2026-10-09T11:00:12,Payment,Complete,rent share Oct,Jane Doe,Narin Property Mgmt,- $650.00,,0,,0,,Chase Checking,,,,,Venmo,
+,3801234567890123410,2026-10-18T13:47:09,Payment,Complete,birthday gift,Pranee S,Jane Doe,+ $40.00,,0,,0,,,Venmo balance,,,,Venmo,
+,,,,,,,,,,,,,,,,,$0.00,$0.00,,$0.00
+In case of errors or questions about your electronic transfers:,,,,,,,,,,,,,,,,,,,,

@@ -14,10 +14,13 @@ import type { Aliases, Transaction } from '../lib/types';
 import { money } from '../format';
 import { useT } from '../i18n';
 import { mergeKind } from '../lib/mergeCheck';
+import { resolveAlias } from '../lib/normalize';
 import type { Selection } from './GraphView';
 
 interface Props {
   txns: Transaction[]; // filtered
+  /** flows between other people (graph only) */
+  links?: Transaction[];
   aliases: Aliases;
   graph: Graph;
   accounts: string[];
@@ -340,7 +343,7 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
   );
 }
 
-function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename, onUnmerge }: Props & { selection: Selection }) {
+function Details({ txns, links = [], aliases, graph, accounts, selection, onSelect, onRename, onUnmerge }: Props & { selection: Selection }) {
   const [newName, setNewName] = useState('');
   const tr = useT();
   const back = (
@@ -348,7 +351,7 @@ function Details({ txns, aliases, graph, accounts, selection, onSelect, onRename
       {tr('back')}
     </button>
   );
-  const byId = useMemo(() => new Map(txns.map((t) => [t.id, t])), [txns]);
+  const byId = useMemo(() => new Map([...txns, ...links].map((t) => [t.id, t])), [txns, links]);
 
   if (selection.kind === 'edge') {
     const e = graph.edges.find((x) => x.id === selection.id);
@@ -484,12 +487,18 @@ function TxList({ txns, aliases, compact }: { txns: Transaction[]; aliases: Alia
             <tr key={t.id} title={`${t.description}\n${t.source}`}>
               <td className="small">{t.date}</td>
               <td>
-                {!compact && <div>{counterpartyName(t, aliases)}</div>}
-                <div className="muted small desc">
-                  {t.account} · {t.description}
-                </div>
+                {t.link ? (
+                  <div>
+                    <span className="link-tag">
+                      {resolveAlias(t.link.from, aliases)} → {resolveAlias(t.link.to, aliases)}
+                    </span>
+                  </div>
+                ) : (
+                  !compact && <div>{counterpartyName(t, aliases)}</div>
+                )}
+                <div className="muted small desc">{t.link ? t.description : `${t.account} · ${t.description}`}</div>
               </td>
-              <td className={`num ${t.amount < 0 ? 'out' : 'in'}`}>{money(t.amount)}</td>
+              <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{money(t.link ? -t.amount : t.amount)}</td>
             </tr>
           ))}
         </tbody>

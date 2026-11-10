@@ -221,3 +221,6 @@ tr.clickable:hover { background: #f9fafb; }
 .merge-hint.merge { background: #fff7ed; color: #9a3412; }
 .merge-hint.account { background: #f5f3ff; color: #5b21b6; }
 .merge-hint.rename { background: #f1f5f9; color: #334155; }
+
+.link-tag { display: inline-block; font-size: 12.5px; padding: 1px 8px; border-radius: 6px; background: #f5f3ff; color: #5b21b6; font-weight: 500; }
+.link-count { color: #5b21b6; }

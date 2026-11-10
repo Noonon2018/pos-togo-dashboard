@@ -31,6 +31,8 @@ const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import
 
 export default function App() {
   const [txns, setTxns] = useState<Transaction[]>([]);
+  /** flows between other people from "from → to" files (graph only) */
+  const [links, setLinks] = useState<Transaction[]>([]);
   const [queue, setQueue] = useState<PendingFile[]>([]);
   const [profiles, setProfiles] = useState<BankProfile[]>(loadProfiles);
   const [aliases, setAliases] = useState(loadAliases);
@@ -62,7 +64,8 @@ export default function App() {
 
   const accounts = useMemo(() => [...new Set(txns.map((t) => t.account))].sort(), [txns]);
   const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
-  const graph = useMemo(() => buildGraph(txns, aliases, filters), [txns, aliases, filters]);
+  const graph = useMemo(() => buildGraph(txns, aliases, filters, links), [txns, aliases, filters, links]);
+  const hasData = txns.length + links.length > 0;
   const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
   const dateBounds = useMemo(() => {
     const ds = txns.map((t) => t.date).sort();
@@ -103,13 +106,18 @@ export default function App() {
     setQueue((q) => [...q, ...entries]);
   };
 
-  const finishImport = (newTx: Transaction[], profile: BankProfile | null) => {
+  const finishImport = (newTx: Transaction[], newLinks: Transaction[], profile: BankProfile | null) => {
     const file = queue[0];
+    const linkIds = new Set(links.map((l) => l.id));
+    const freshLinks = newLinks.filter((l) => !linkIds.has(l.id));
+    if (freshLinks.length) setLinks((cur) => [...cur, ...freshLinks]);
+    // a file with only other people's flows has nothing for the summary: open the graph
+    if (!newTx.length && freshLinks.length && !txns.length) setView('graph');
     setTxns((cur) => {
       const ids = new Set(cur.map((t) => t.id));
       const fresh = newTx.filter((t) => !ids.has(t.id));
-      const skipped = newTx.length - fresh.length;
-      setStatus(t('imported', { n: fresh.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
+      const skipped = newTx.length - fresh.length + (newLinks.length - freshLinks.length);
+      setStatus(t('imported', { n: fresh.length + freshLinks.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
       setUndo(null);
       return [...cur, ...fresh];
     });
@@ -159,7 +167,7 @@ export default function App() {
       if (!confirm(t('mergeConfirmAccount', { list: w.names.join(', '), to: target }))) return false;
     }
     const kind = mergeKind(target, new Set(nameCategory.keys()), accounts);
-    const raw = new Set(txns.map((x) => x.counterparty));
+    const raw = new Set([...txns.map((x) => x.counterparty), ...links.flatMap((l) => (l.link ? [l.link.from, l.link.to] : []))]);
     const next = sources.reduce((a, f) => renameCounterparty(a, raw, f, target), aliases);
     const from = sources.join(', ');
     changeNames(next, t(kind === 'merge' ? 'toastMerged' : kind === 'account' ? 'toastAccount' : 'toastRenamed', { from, to: target }));
@@ -177,6 +185,7 @@ export default function App() {
   const clearAll = () => {
     if (!confirm(t('confirmClear'))) return;
     setTxns([]);
+    setLinks([]);
     setSelection(null);
     setFilters(DEFAULT_FILTERS);
     setStmtRange({});
@@ -223,10 +232,10 @@ export default function App() {
             e.target.value = '';
           }}
         />
-        {txns.length > 0 && (
+        {hasData && (
           <>
             <span className="muted small">
-              {t('stats', { t: txns.length, a: accounts.length, n: graph.nodes.length })}
+              {t('stats', { t: txns.length + links.length, a: accounts.length, n: graph.nodes.length })}
             </span>
             <span className="spacer" />
             {view === 'graph' && (
@@ -248,7 +257,7 @@ export default function App() {
         )}
       </header>
 
-      {txns.length > 0 && (
+      {hasData && (
         <nav className="views">
           <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
             {t('viewSummary')}
@@ -259,7 +268,7 @@ export default function App() {
         </nav>
       )}
 
-      {txns.length > 0 && view === 'graph' && (
+      {hasData && view === 'graph' && (
         <div className="filters">
           <label>
             {t('from')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />
@@ -331,7 +340,7 @@ export default function App() {
         </div>
       )}
 
-      {txns.length === 0 ? (
+      {!hasData ? (
         <main className="empty">
           <div className="empty-card">
             <h2>{t('emptyTitle')}</h2>
@@ -388,6 +397,7 @@ export default function App() {
           <GraphView ref={graphRef} graph={graph} selected={selection} onSelect={setSelection} />
           <SidePanel
             txns={filtered}
+            links={links}
             aliases={aliases}
             graph={graph}
             accounts={accounts}

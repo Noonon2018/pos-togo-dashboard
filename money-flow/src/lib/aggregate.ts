@@ -89,10 +89,21 @@ export function findMirroredTransfers(txns: Transaction[], aliases: Aliases, acc
 }
 
 /** Build the aggregated, directed flow graph. Edge totals are always positive dollars. */
-export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filters): Graph {
+/**
+ * @param links flows between other parties (from "from → to" files); graph only. A link side whose
+ *              name (after aliases) is one of my accounts is drawn as that account.
+ */
+export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filters, links: Transaction[] = []): Graph {
   const accounts = new Set(all.map((t) => t.account));
   const txns = filterTransactions(all, filters);
   const mirrored = findMirroredTransfers(txns, aliases, accounts);
+  // links: date range and minimum amount apply; account/direction filters are about my accounts
+  const linkTx = filterTransactions(links, { ...filters, accounts: [], direction: 'all' }).filter((t) => t.link);
+  const ownName = (raw: string) => {
+    const n = resolveAlias(raw, aliases);
+    for (const a of accounts) if (a.toUpperCase() === n.toUpperCase()) return { account: a, name: a };
+    return { account: null as string | null, name: n };
+  };
 
   // rank external counterparties by volume to apply topN
   const volume = new Map<string, number>();
@@ -100,6 +111,12 @@ export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filter
     if (mirrored.has(t.id) || ownAccountOf(t, aliases, accounts)) continue;
     const n = counterpartyName(t, aliases);
     volume.set(n, (volume.get(n) ?? 0) + Math.abs(t.amount));
+  }
+  for (const t of linkTx) {
+    for (const side of [t.link!.from, t.link!.to]) {
+      const o = ownName(side);
+      if (!o.account) volume.set(o.name, (volume.get(o.name) ?? 0) + Math.abs(t.amount));
+    }
   }
   const ranked = [...volume.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
   const keep = filters.topN > 0 ? new Set(ranked.slice(0, filters.topN)) : new Set(ranked);
@@ -124,6 +141,26 @@ export function buildGraph(all: Transaction[], aliases: Aliases, filters: Filter
     }
     const amt = Math.abs(t.amount);
     const [src, dst] = t.amount < 0 ? [acct, other] : [other, acct];
+    src.totalOut += amt;
+    dst.totalIn += amt;
+    src.count++;
+    dst.count++;
+    const eid = `${src.id}->${dst.id}`;
+    const e = edges.get(eid) ?? edges.set(eid, { id: eid, source: src.id, target: dst.id, count: 0, total: 0, txIds: [] }).get(eid)!;
+    e.count++;
+    e.total += amt;
+    e.txIds.push(t.id);
+  }
+  const partyNode = (raw: string) => {
+    const o = ownName(raw);
+    if (o.account) return node(accountNodeId(o.account), o.account, 'account');
+    return keep.has(o.name) ? node(cpNodeId(o.name), o.name, 'counterparty') : node(OTHER_NODE, `OTHER (${otherCount} counterparties)`, 'other');
+  };
+  for (const t of linkTx) {
+    const src = partyNode(t.link!.from);
+    const dst = partyNode(t.link!.to);
+    if (src === dst) continue; // both grouped into OTHER, or a self-transfer
+    const amt = Math.abs(t.amount);
     src.totalOut += amt;
     dst.totalIn += amt;
     src.count++;

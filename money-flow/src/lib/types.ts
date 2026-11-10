@@ -11,6 +11,11 @@ export interface Transaction {
   counterparty: string;
   /** Source file name, for traceability. */
   source: string;
+  /**
+   * Set for a flow between two OTHER parties (from a "from → to" file, e.g. A paid B).
+   * Such rows only appear in the graph; they are not your income or spending.
+   */
+  link?: { from: string; to: string };
 }
 
 export type AmountMode = 'signed' | 'debitCredit';
@@ -29,6 +34,14 @@ export interface ColumnMapping {
   /** Flip sign (credit-card exports often show purchases as positive). */
   invert: boolean;
   dateFormat: DateFormat;
+  /** Lines to skip before the header row (title lines in Venmo-style exports). */
+  skipRows?: number;
+  /** 'fromTo' = each row says who paid whom (columns `from` and `to`). */
+  flow?: 'account' | 'fromTo';
+  from?: string;
+  to?: string;
+  /** Your own name/email as it appears in the from/to columns. Empty = all rows are between others. */
+  me?: string;
 }
 
 export interface BankProfile {

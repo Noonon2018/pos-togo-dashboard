@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { applyMapping, guessMapping, headerSignature, parseCsvText, type ParsedCsv } from '../lib/csv';
+import { applyMapping, detectMe, findHeaderRow, guessMapping, headerSignature, looksLikeHeader, parseCsvText, type ParsedCsv } from '../lib/csv';
 import type { StatementResult } from '../lib/pdfStatement';
 import type { BankProfile, ColumnMapping, Transaction } from '../lib/types';
 import { money } from '../format';
@@ -17,7 +17,7 @@ interface Props {
   remaining: number;
   profiles: BankProfile[];
   accounts: string[];
-  onImport: (txns: Transaction[], profile: BankProfile | null) => void;
+  onImport: (txns: Transaction[], links: Transaction[], profile: BankProfile | null) => void;
   onSkip: () => void;
 }
 
@@ -35,14 +35,18 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
       const p = file.pdf.parsed;
       return { mapping: { ...guessMapping(p.headers, true, p.rows), dateFormat: 'YMD' as const }, profileName: '' };
     }
-    const withHeader = parseCsvText(file.text, true);
+    const skipRows = findHeaderRow(file.text); // title lines above the header (Venmo, PayPal)
+    const withHeader = parseCsvText(file.text, true, skipRows);
     const sig = headerSignature(withHeader.headers);
     const prof = profiles.find((p) => p.signature === sig);
-    if (prof) return { mapping: prof.mapping, profileName: prof.name };
-    // no profile: a header row normally has no digits; bank rows always do
-    const looksHeaderless = withHeader.headers.some((h) => /\d/.test(h));
-    const p = parseCsvText(file.text, !looksHeaderless);
-    return { mapping: guessMapping(p.headers, !looksHeaderless, p.rows), profileName: '' };
+    if (prof) {
+      // the owner's name differs per person: re-detect it rather than reuse the saved one
+      const me = prof.mapping.flow === 'fromTo' && prof.mapping.from && prof.mapping.to ? detectMe(withHeader, prof.mapping.from, prof.mapping.to) : null;
+      return { mapping: { ...prof.mapping, skipRows, ...(me ? { me } : {}) }, profileName: prof.name };
+    }
+    const hasHeader = looksLikeHeader(withHeader.headers);
+    const p = parseCsvText(file.text, hasHeader, skipRows);
+    return { mapping: { ...guessMapping(p.headers, hasHeader, p.rows), skipRows }, profileName: '' };
   }, [file, profiles]);
 
   const [mapping, setMapping] = useState<ColumnMapping>(initial.mapping);
@@ -51,8 +55,8 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
   const [saveProfile, setSaveProfile] = useState(!initial.profileName && !file.pdf);
 
   const parsed: ParsedCsv = useMemo(
-    () => file.pdf?.parsed ?? parseCsvText(file.text, mapping.hasHeader),
-    [file.pdf, file.text, mapping.hasHeader],
+    () => file.pdf?.parsed ?? parseCsvText(file.text, mapping.hasHeader, mapping.skipRows ?? 0),
+    [file.pdf, file.text, mapping.hasHeader, mapping.skipRows],
   );
   const result = useMemo(
     () => applyMapping(parsed, mapping, account.trim() || 'Account', file.name),
@@ -61,10 +65,20 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
 
   const set = (patch: Partial<ColumnMapping>) => setMapping((m) => ({ ...m, ...patch }));
   const setHasHeader = (hasHeader: boolean) => {
-    const p = parseCsvText(file.text, hasHeader);
-    setMapping({ ...guessMapping(p.headers, hasHeader, p.rows), hasHeader });
+    const p = parseCsvText(file.text, hasHeader, mapping.skipRows ?? 0);
+    setMapping({ ...guessMapping(p.headers, hasHeader, p.rows), hasHeader, skipRows: mapping.skipRows });
   };
 
+  const isFromTo = mapping.flow === 'fromTo';
+  // names that appear most in from/to — candidates for "your name in this file"
+  const topNames = useMemo(() => {
+    if (!isFromTo) return [];
+    const iF = parsed.headers.indexOf(mapping.from ?? '');
+    const iT = parsed.headers.indexOf(mapping.to ?? '');
+    const c = new Map<string, number>();
+    for (const r of parsed.rows) for (const i of [iF, iT]) if (i >= 0 && r[i]) c.set(r[i].toUpperCase().trim(), (c.get(r[i].toUpperCase().trim()) ?? 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n]) => n);
+  }, [isFromTo, parsed, mapping.from, mapping.to]);
   const inflow = result.transactions.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const outflow = result.transactions.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0);
   const fatal = result.errors.find((e) => e.row === 0);
@@ -89,7 +103,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
       saveProfile && name
         ? { name, signature: mapping.hasHeader ? headerSignature(parsed.headers) : `noheader:${parsed.headers.length}`, mapping }
         : null;
-    onImport(result.transactions, profile);
+    onImport(result.transactions, result.links, profile);
   };
 
   return (
@@ -135,6 +149,34 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
               <option value="YMD">YYYY-MM-DD</option>
             </select>
           </label>
+          {!file.pdf && (
+            <label className="field wide">
+              <span>{t('flowMode')}</span>
+              <select id="flow-mode" value={mapping.flow ?? 'account'} onChange={(e) => set({ flow: e.target.value as ColumnMapping['flow'] })}>
+                <option value="account">{t('flowAccount')}</option>
+                <option value="fromTo">{t('flowFromTo')}</option>
+              </select>
+            </label>
+          )}
+          {isFromTo ? (
+            <>
+              {colSelect(t('fromCol'), mapping.from, (v) => set({ from: v || undefined }))}
+              {colSelect(t('toCol'), mapping.to, (v) => set({ to: v || undefined }))}
+              {colSelect(t('amount'), mapping.amount, (v) => set({ amount: v }))}
+              {colSelect(t('noteCol'), mapping.description, (v) => set({ description: v }), true)}
+              <label className="field wide">
+                <span>{t('meLabel')}</span>
+                <input id="me-name" list="me-list" value={mapping.me ?? ''} placeholder={t('mePh')} onChange={(e) => set({ me: e.target.value })} />
+                <datalist id="me-list">
+                  {topNames.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+                <span className="field-hint">{t('meHint')}</span>
+              </label>
+            </>
+          ) : (
+          <>
           {colSelect(t('description'), mapping.description, (v) => set({ description: v }))}
           <label className="field">
             <span>{t('amountLayout')}</span>
@@ -157,6 +199,9 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
               {t('flip')}
             </span>
           </label>
+          </>
+          )}
+          {!file.pdf && (mapping.skipRows ?? 0) > 0 && <p className="small muted wide">{t('skippedTitleRows', { n: mapping.skipRows ?? 0 })}</p>}
         </div>
 
         <div className="preview">
@@ -164,6 +209,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
             <span>
               <b>{t('txCount', { n: result.transactions.length })}</b>
             </span>
+            {isFromTo && <span className="link-count">{t('linkCount', { n: result.links.length })}</span>}
             <span className="in">{t('in')} {money(inflow)}</span>
             <span className="out">{t('out')} {money(outflow)}</span>
             {result.errors.length > 0 && !fatal && <span className="warn">{t('rowsSkipped', { n: result.errors.length })}</span>}
@@ -181,14 +227,20 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
                 </tr>
               </thead>
               <tbody>
-                {result.transactions.slice(0, 8).map((t) => (
+                {[...result.transactions.slice(0, 8), ...result.links.slice(0, isFromTo ? 6 : 0)].map((t) => (
                   <tr key={t.id}>
                     <td>{t.date}</td>
                     <td className="desc">{t.description}</td>
                     <td>
-                      <b>{t.counterparty}</b>
+                      {t.link ? (
+                        <span className="link-tag">
+                          {t.link.from} → {t.link.to}
+                        </span>
+                      ) : (
+                        <b>{t.counterparty}</b>
+                      )}
                     </td>
-                    <td className={`num ${t.amount < 0 ? 'out' : 'in'}`}>{money(t.amount)}</td>
+                    <td className={`num ${t.link ? '' : t.amount < 0 ? 'out' : 'in'}`}>{money(t.link ? -t.amount : t.amount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,9 +258,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
               </ul>
             </details>
           )}
-          <p className="muted small">
-            {t('checkSign')}
-          </p>
+          {!isFromTo && <p className="muted small">{t('checkSign')}</p>}
         </div>
 
         <footer className="modal-foot">
@@ -230,8 +280,8 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
           </>}
           <span className="spacer" />
           <button onClick={onSkip}>{t('skipFile')}</button>
-          <button className="primary" disabled={!!fatal || result.transactions.length === 0} onClick={doImport}>
-            {t('importN', { n: result.transactions.length })}
+          <button className="primary" disabled={!!fatal || result.transactions.length + result.links.length === 0} onClick={doImport}>
+            {t('importN', { n: result.transactions.length + result.links.length })}
           </button>
         </footer>
       </div>

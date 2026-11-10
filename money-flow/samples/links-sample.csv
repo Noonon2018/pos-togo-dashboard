@@ -1,0 +1,9 @@
+วันที่,จาก,ไป,จำนวนเงิน,หมายเหตุ
+2026-08-02,Bob Smith,Alice Lee,1500.00,ค่าสินค้าล็อต A
+2026-08-05,Alice Lee,Charlie Kim,1200.00,ส่งต่อ
+2026-08-06,Charlie Kim,Personal Checking,1000.00,คืนเงินยืม
+2026-08-20,Bob Smith,Alice Lee,1500.00,ค่าสินค้าล็อต B
+2026-08-22,Alice Lee,Charlie Kim,1300.00,ส่งต่อ
+2026-08-25,Charlie Kim,Dao Market LLC,1250.00,ซื้อของ
+2026-09-02,Dao Market LLC,Bob Smith,900.00,คืนทุน
+2026-09-10,Personal Checking,Alice Lee,300.00,ยืม
