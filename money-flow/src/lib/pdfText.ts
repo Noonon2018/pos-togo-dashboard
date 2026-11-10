@@ -3,8 +3,10 @@
  * nothing uploaded). Items are grouped into lines by their baseline and sorted left-to-right.
  */
 export async function pdfToLines(data: ArrayBuffer): Promise<string[]> {
-  const pdfjs = await import('pdfjs-dist');
-  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  // Legacy build: polyfills newer JS (e.g. Uint8Array.prototype.toHex) that the modern build
+  // needs and that Chrome/Edge versions from before late 2025 don't have.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
 
   const task = pdfjs.getDocument({ data, disableFontFace: true });
