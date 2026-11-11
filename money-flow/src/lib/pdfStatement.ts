@@ -30,6 +30,8 @@ export interface StatementResult {
   /** beginning + Σamounts − ending; 0 means the statement reconciles. null if unknown. */
   reconcileDiff: number | null;
   suggestedAccount: string;
+  /** set for DoorDash merchant statements (not a bank statement) */
+  doordash?: { payouts: number; net: number };
 }
 
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];

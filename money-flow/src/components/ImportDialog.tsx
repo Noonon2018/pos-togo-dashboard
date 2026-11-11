@@ -340,6 +340,14 @@ function PdfCheck({ pdf, ocr }: { pdf: StatementResult; ocr?: boolean }) {
   const t = useT();
   const { info, reconcileDiff, balanceMismatches, hasBalance } = pdf;
   const ok = reconcileDiff === 0 && balanceMismatches === 0;
+  if (pdf.doordash)
+    return (
+      <div className={`pdf-check ${ok ? 'ok' : 'bad'}`}>
+        <b>{ok ? t('ddOk', { n: pdf.doordash.payouts }) : t('ddBad', { n: balanceMismatches })}</b>
+        <div className="small">{t('ddNet', { amt: money(pdf.doordash.net) })}</div>
+        <div className="small">{t('ddHint')}</div>
+      </div>
+    );
   return (
     <div className={`pdf-check ${ok ? 'ok' : 'bad'}`}>
       <b>{ok ? t('pdfOk') : reconcileDiff === null ? t('pdfNoTotals') : t('pdfBad')}</b>

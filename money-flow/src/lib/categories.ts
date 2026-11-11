@@ -41,12 +41,14 @@ export const CATEGORIES: Category[] = [
   { id: 'payroll', th: 'เงินเดือนพนักงาน & ภาษี', en: 'Payroll & taxes', icon: '🧾', color: '#78350f', kind: 'spend' },
   { id: 'people', th: 'โอนให้คน', en: 'Paid to people', icon: '👤', color: '#4f46e5', kind: 'spend' },
   { id: 'fees', th: 'ค่าธรรมเนียม', en: 'Fees', icon: '🏦', color: '#991b1b', kind: 'spend' },
+  { id: 'delivery_fees', th: 'ค่าคอม & การตลาดแอปส่งอาหาร', en: 'Delivery app commission & marketing', icon: '🛵', color: '#dc2626', kind: 'spend' },
   { id: 'other', th: 'อื่นๆ', en: 'Other', icon: '📦', color: '#6b7280', kind: 'spend' },
   { id: 'cash', th: 'ถอนเงินสด', en: 'Cash withdrawals', icon: '💵', color: '#a16207', kind: 'cash' },
   { id: 'invest', th: 'ลงทุน / คริปโต', en: 'Investing / crypto', icon: '📈', color: '#0f766e', kind: 'invest' },
   { id: 'donation', th: 'เงินบริจาค', en: 'Donations', icon: '🎁', color: '#059669', kind: 'income' },
   { id: 'salary', th: 'เงินเดือน', en: 'Salary', icon: '💼', color: '#15803d', kind: 'income' },
   { id: 'deposit', th: 'ฝากเงิน / ยอดขาย', en: 'Deposits & sales', icon: '🏧', color: '#16a34a', kind: 'income' },
+  { id: 'sales_tax', th: 'ภาษีขายที่เก็บมา (ต้องนำส่ง)', en: 'Sales tax collected (to remit)', icon: '🧾', color: '#ca8a04', kind: 'income' },
   { id: 'from_people', th: 'รับโอนจากคน', en: 'From people', icon: '🤝', color: '#22c55e', kind: 'income' },
   { id: 'refund', th: 'เงินคืน', en: 'Refunds', icon: '↩️', color: '#4ade80', kind: 'income' },
   { id: 'interest', th: 'ดอกเบี้ย', en: 'Interest', icon: '💰', color: '#86efac', kind: 'income' },
@@ -97,6 +99,11 @@ export function autoCategory(t: Transaction, name: string, isOwnTransfer: boolea
   if (isOwnTransfer) return 'transfer';
   const text = `${name} | ${t.description}`.toUpperCase();
   if (/TRANSFER (CHK|SAV|ACCT|MMA|CARD|LOC)\b/.test(name)) return 'transfer';
+  // DoorDash merchant statement rows (see doordash.ts)
+  if (/^PAYOUT TO BANK\b/.test(name)) return 'transfer';
+  if (/^SALES TAX COLLECTED\b/.test(name)) return 'sales_tax';
+  if (/^DELIVERY APP SALES\b/.test(name)) return 'deposit';
+  if (/^(APP COMMISSION|APP MERCHANT FEES|APP MARKETING FEES|DISCOUNTS YOU FUNDED|ERROR CHARGES AND ADJUSTMENTS|APP-FUNDED PROMOS)\b/.test(name)) return t.amount > 0 ? 'refund' : 'delivery_fees';
   if (INVEST.test(text)) return 'invest';
   if (t.amount > 0) {
     if (/บริจาค|DONATION|DONATE|ทำบุญ/.test(text)) return 'donation';

@@ -15,6 +15,8 @@ const TH = [
     p: [
       'ใช้ได้ทั้ง PDF statement และ CSV',
       'Chase: เข้า chase.com → เลือกบัญชี → Statements → โหลด PDF ทีละเดือน หรือกดไอคอนดาวน์โหลด (ลูกศรลง) → เลือก Spreadsheet (CSV)',
+      'ร้านอาหาร: PDF statement จาก DoorDash Merchant Portal (Financials → Statements) ใส่ได้เลย ระบบจะแยกค่าคอม ค่าการตลาด และส่วนลดที่ร้านออกให้เห็น',
+      'ไฟล์ Excel (.xlsx): เปิดใน Excel → File → Save As → เลือก CSV (Comma delimited) แล้วค่อยใส่ ใช้ได้เฉพาะตารางที่มี 1 แถว = 1 รายการ',
       'เก็บไฟล์ไว้ในโฟลเดอร์ money-flow\\data\\ (ไม่ขึ้น GitHub)',
       'แนะนำให้โหลด 3 เดือนขึ้นไป จะเห็นรายจ่ายประจำชัดเจน',
     ],

@@ -13,6 +13,7 @@ import { shortAddress } from './lib/csv';
 import { useLang, useT } from './i18n';
 import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
+import { doorDashStatement } from './lib/doordash';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
 import {
@@ -133,7 +134,7 @@ export default function App() {
           const buf = await f.arrayBuffer();
           // pdf.js may take ownership of the buffer: give each reader its own copy
           const lines = await pdfToLines(buf.slice(0));
-          let pdf = parseStatementLines(lines);
+          let pdf = doorDashStatement(lines) ?? parseStatementLines(lines);
           let ocr = false;
           // almost no text = the pages are pictures (a scan): read them with OCR
           if (!pdf.parsed.rows.length && lines.join('').replace(/\s/g, '').length < 200) {
