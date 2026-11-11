@@ -75,14 +75,8 @@ export function fixOcrLine(line: string): string {
     .replace(/(?<=\d,\d{3})\s?,(?=\d{2}\b)/g, '.'); // "1,234,56" (comma read for the decimal point)
 }
 
-export async function ocrPdfToLines(data: ArrayBuffer, onProgress?: (p: OcrProgress) => void): Promise<string[]> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const pdfWorker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker.default;
+async function makeWorker(onLog: (part: number) => void) {
   const { createWorker, OEM, PSM } = await import('tesseract.js');
-
-  let pageNo = 0;
-  let pages = 0;
   const worker = await createWorker(['eng', 'tha'], OEM.LSTM_ONLY, {
     workerPath: `${base()}worker.min.js`,
     corePath: `${base()}core`,
@@ -91,19 +85,46 @@ export async function ocrPdfToLines(data: ArrayBuffer, onProgress?: (p: OcrProgr
     cacheMethod: 'none', // nothing written to the browser's storage
     gzip: true,
     logger: (m: { status: string; progress: number }) => {
-      if (m.status === 'recognizing text' && pages) onProgress?.({ page: pageNo, pages, part: m.progress });
+      if (m.status === 'recognizing text') onLog(m.progress);
     },
   });
   await worker.setParameters({
     tessedit_pageseg_mode: PSM.SINGLE_BLOCK, // keep each statement row together
     preserve_interword_spaces: '1',
   });
+  return worker;
+}
 
+async function readCanvas(worker: Awaited<ReturnType<typeof makeWorker>>, canvas: HTMLCanvasElement): Promise<string[]> {
+  const { data: res } = await worker.recognize(canvas, {}, { blocks: true, text: false });
+  // the OCR's own lines (rows of the statement), each line's words glued as above
+  const lines = res.blocks?.flatMap((b) => b.paragraphs.flatMap((pa) => pa.lines)) ?? [];
+  const sortedLines = [...lines].sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  return sortedLines.map((l) => fixOcrLine(lineText(l.words.map((w) => ({ text: w.text, ...w.bbox }))))).filter(Boolean);
+}
+
+function whiteCanvas(w: number, h: number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(w);
+  canvas.height = Math.ceil(h);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return { canvas, ctx };
+}
+
+export async function ocrPdfToLines(data: ArrayBuffer, onProgress?: (p: OcrProgress) => void): Promise<string[]> {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfWorker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker.default;
+  let pageNo = 0;
+  let pages = 0;
+  const worker = await makeWorker((part) => pages && onProgress?.({ page: pageNo, pages, part }));
   const task = pdfjs.getDocument({ data, disableFontFace: true });
-  const doc = await task.promise;
-  pages = doc.numPages;
   const out: string[] = [];
   try {
+    const doc = await task.promise;
+    pages = doc.numPages;
     for (let p = 1; p <= doc.numPages; p++) {
       pageNo = p;
       onProgress?.({ page: p, pages, part: 0 });
@@ -112,18 +133,9 @@ export async function ocrPdfToLines(data: ArrayBuffer, onProgress?: (p: OcrProgr
       const unscaled = page.getViewport({ scale: 1 });
       const scale = Math.min(300 / 72, 4000 / Math.max(unscaled.width, unscaled.height));
       const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const { canvas, ctx } = whiteCanvas(viewport.width, viewport.height);
       await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-      const { data: res } = await worker.recognize(canvas, {}, { blocks: true, text: false });
-      // the OCR's own lines (rows of the statement), each line's words glued as above
-      const lines = res.blocks?.flatMap((b) => b.paragraphs.flatMap((pa) => pa.lines)) ?? [];
-      const sortedLines = [...lines].sort((a, b) => a.bbox.y0 - b.bbox.y0);
-      out.push(...sortedLines.map((l) => fixOcrLine(lineText(l.words.map((w) => ({ text: w.text, ...w.bbox }))))).filter(Boolean));
+      out.push(...(await readCanvas(worker, canvas)));
       page.cleanup();
       canvas.width = canvas.height = 0; // free the memory
     }
@@ -132,4 +144,23 @@ export async function ocrPdfToLines(data: ArrayBuffer, onProgress?: (p: OcrProgr
     await task.destroy();
   }
   return out;
+}
+
+/** A photo or screenshot of a statement (.jpg / .png / …). Small images are enlarged for the OCR. */
+export async function ocrImageToLines(file: Blob, onProgress?: (p: OcrProgress) => void): Promise<string[]> {
+  const bmp = await createImageBitmap(file);
+  const long = Math.max(bmp.width, bmp.height);
+  const scale = long < 2000 ? 2000 / long : long > 5000 ? 5000 / long : 1;
+  const { canvas, ctx } = whiteCanvas(bmp.width * scale, bmp.height * scale);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  const worker = await makeWorker((part) => onProgress?.({ page: 1, pages: 1, part }));
+  try {
+    onProgress?.({ page: 1, pages: 1, part: 0 });
+    return await readCanvas(worker, canvas);
+  } finally {
+    await worker.terminate();
+    canvas.width = canvas.height = 0;
+  }
 }

@@ -14,6 +14,7 @@ import { useLang, useT } from './i18n';
 import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { doorDashStatement } from './lib/doordash';
+import { docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
 import {
@@ -117,7 +118,7 @@ export default function App() {
   const addFiles = useCallback(async (files: FileList | File[]) => {
     keepCurrency.current = false;
     const all = [...files];
-    const csvs = all.filter((f) => /\.(csv|txt)$/i.test(f.name) || f.type.includes('csv'));
+    const csvs = all.filter((f) => /\.(csv|txt|tsv)$/i.test(f.name) || f.type.includes('csv'));
     const pdfs = all.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
     const texts = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
     preferBahtFor(texts.map((x) => x.text).join('\n'));
@@ -155,12 +156,68 @@ export default function App() {
         }
       }
     }
+    // Excel / LibreOffice / Word files and photos of statements
+    const docs = all.filter((f) => docKind(f.name, f.type));
+    for (const f of docs) {
+      const kind = docKind(f.name, f.type)!;
+      try {
+        if (kind === 'oldOffice') {
+          problems.push(t('oldOffice', { f: f.name }));
+          continue;
+        }
+        if (kind === 'image') {
+          const { ocrImageToLines } = await import('./lib/pdfOcr');
+          const lines = await ocrImageToLines(f, ({ part }) => setStatus(t('ocrProgress', { f: f.name, p: 1, n: 1, pct: Math.round(part * 100) })));
+          const pdf = parseStatementLines(lines);
+          if (pdf.parsed.rows.length) {
+            preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
+            read.push({ name: f.name, text: '', pdf, ocr: true });
+          } else problems.push(t('ocrNoTx', { f: f.name }));
+          continue;
+        }
+        setStatus(t('readingDoc', { f: f.name }));
+        const data = new Uint8Array(await f.arrayBuffer());
+        let tables: Sheet[] = [];
+        let lines: string[] = [];
+        if (kind === 'xlsx') tables = readXlsx(data);
+        else if (kind === 'ods') tables = readOds(data);
+        else ({ tables, lines } = readDocx(data));
+        let used = 0;
+        const skipped: string[] = [];
+        for (const sh of tables) {
+          const text = toCsv(sh.rows);
+          const label = tables.length > 1 || kind === 'docx' ? `${f.name} › ${sh.name}` : f.name;
+          if (isAddressBookCsv(text)) {
+            addToBook(parseAddressBook(text));
+            used++;
+          } else if (looksLikeTransactions(sh.rows)) {
+            preferBahtFor(text);
+            read.push({ name: label, text });
+            used++;
+          } else if (sh.rows.length) skipped.push(sh.name);
+        }
+        // a Word file whose statement is written as text lines, not a table
+        if (!used && lines.length) {
+          const pdf = parseStatementLines(lines);
+          if (pdf.parsed.rows.length) {
+            read.push({ name: f.name, text: '', pdf });
+            used++;
+          }
+        }
+        if (!used) problems.push(t('docNoTx', { f: f.name }));
+        else if (skipped.length) problems.push(t('docSkipped', { f: f.name, s: skipped.join(', ') }));
+      } catch (e) {
+        problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
+      }
+    }
+    const known = new Set([...csvs, ...pdfs, ...docs]);
+    for (const f of all) if (!known.has(f)) problems.push(t('unsupportedFile', { f: f.name }));
     // oldest statement first so the account name from the first one is reused for the rest
     read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
     if (problems.length) setStatus(problems.join(' · '));
     else if (!read.length && !books.length) setStatus(t('unsupported'));
-    else if (pdfs.length) setStatus('');
+    else if (pdfs.length || docs.length) setStatus('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
@@ -347,7 +404,7 @@ export default function App() {
         <input
           ref={fileInput}
           type="file"
-          accept=".csv,.pdf,text/csv,application/pdf"
+          accept=".csv,.tsv,.txt,.pdf,.xlsx,.xlsm,.ods,.docx,.xls,.doc,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"
           multiple
           hidden
           onChange={(e) => {
