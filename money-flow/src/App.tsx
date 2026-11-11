@@ -14,6 +14,7 @@ import { useLang, useT } from './i18n';
 import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { doorDashStatement } from './lib/doordash';
+import Papa from 'papaparse';
 import { docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
@@ -124,9 +125,15 @@ export default function App() {
     preferBahtFor(texts.map((x) => x.text).join('\n'));
     // address books (address,name,type) go straight into the book; everything else to the import step
     const books = texts.filter((f) => isAddressBookCsv(f.text));
-    const read: PendingFile[] = texts.filter((f) => !isAddressBookCsv(f.text));
-    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     const problems: string[] = [];
+    // a summary report saved as CSV (totals, statuses, notes) has nothing to draw: say so instead of an empty import window
+    const read: PendingFile[] = texts.filter((f) => {
+      if (isAddressBookCsv(f.text)) return false;
+      if (looksLikeTransactions(Papa.parse<string[]>(f.text, { skipEmptyLines: 'greedy' }).data.slice(0, 5000))) return true;
+      problems.push(t('docNoTx', { f: f.name }));
+      return false;
+    });
+    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     if (pdfs.length) {
       setStatus(t('readingPdf', { n: pdfs.length }));
       const { pdfToLines } = await import('./lib/pdfText');
