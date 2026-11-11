@@ -41,3 +41,8 @@ export const saveGoal = (g: { target: number; current: number }) => write(GOAL, 
 /** manual = the user picked the day themselves (don't auto-change it from PDFs any more) */
 export const loadCycle = () => read<{ day: number; manual: boolean }>(CYCLE, { day: 1, manual: false });
 export const saveCycle = (c: { day: number; manual: boolean }) => write(CYCLE, c);
+
+// Address book: names you gave to addresses / parties (no amounts, no transactions).
+const BOOK = 'moneyflow.addressbook.v1';
+export const loadAddressBook = () => read<import('./addressBook').AddressBook>(BOOK, {});
+export const saveAddressBook = (b: import('./addressBook').AddressBook) => write(BOOK, b);

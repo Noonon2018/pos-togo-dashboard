@@ -1,0 +1,6 @@
+address,name,type,note
+0x1111111111111111111111111111111111111111,กระเป๋าของฉัน (ตัวอย่าง),mine,
+0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,เพื่อน A (ตัวอย่าง),person,
+0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,ร้านตัวอย่าง,shop,
+0xcccccccccccccccccccccccccccccccccccccccc,Example Exchange,exchange,ข้อมูลสมมติ
+0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,Example Mixer,mixer,ข้อมูลสมมติ

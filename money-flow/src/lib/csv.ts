@@ -148,6 +148,26 @@ export interface MapResult {
   /** "from → to" rows between two other parties (graph only) */
   links: Transaction[];
   errors: { row: number; reason: string }[];
+  /** address -> name tag found in the file (explorer exports that include name tags) */
+  labels?: Record<string, string>;
+}
+
+/**
+ * Date AND time in ISO (UTC) when the cell has a time: "2026-08-03 18:20:00", "2026-08-03T18:20:00Z",
+ * or unix seconds. Null when there is no time part (bank files only have dates).
+ */
+export function parseDateTime(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (/^\d{9,11}$/.test(v)) {
+    const d = new Date(Number(v) * 1000);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().replace('.000', '');
+  }
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, se] = m;
+  const date = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +(se ?? 0)));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000', '');
 }
 
 /**
@@ -385,6 +405,10 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
   const iStatus = col(mapping.statusCol);
   const iErr = parsed.headers.findIndex((h) => /^err(or)?[ _]?code$/i.test(h));
   const iHash = col(mapping.hashCol);
+  // explorer exports may carry public name tags next to the addresses
+  const iFromTag = parsed.headers.findIndex((h) => /^from[ _]?(name ?tag|nametag|label|name)$/i.test(h) && h !== mapping.from);
+  const iToTag = parsed.headers.findIndex((h) => /^to[ _]?(name ?tag|nametag|label|name)$/i.test(h) && h !== mapping.to);
+  const labels: Record<string, string> = {};
   if (iDate < 0 || (iAmt < 0 && !inOut) || iFrom < 0 || iTo < 0) {
     return { transactions, links, errors: [{ row: 0, reason: 'Date, From, To and Amount columns are required' }] };
   }
@@ -431,10 +455,14 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
       // addresses stay as names, so the same address in another wallet's file joins up in the graph;
       // `account` holds your wallet address on your own rows (drawn as your wallet), '' otherwise
       const description = [note, hash ? `tx ${hash.slice(0, 10)}…` : '', `${shortAddress(from)} → ${shortAddress(to)}`].filter(Boolean).join(' · ');
+      const time = parseDateTime(r[iDate]);
+      if (iFromTag >= 0 && r[iFromTag]?.trim()) labels[from] = r[iFromTag].trim();
+      if (iToTag >= 0 && r[iToTag]?.trim()) labels[to] = r[iToTag].trim();
       links.push({
         id: idFor(`crypto|${hash}|${date}|${amt}|${unit}|${from}|${to}`),
         account: me && (from === me || to === me) ? me : '',
         date,
+        ...(time ? { time } : {}),
         description,
         amount: -amt,
         counterparty: to,
@@ -461,10 +489,12 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
         source,
       });
     } else {
+      const time = parseDateTime(r[iDate]);
       links.push({
         id: idFor(`link|${date}|${amt}|${from}|${to}|${note}`),
         account: from,
         date,
+        ...(time ? { time } : {}),
         description,
         amount: -amt,
         counterparty: to,
@@ -473,5 +503,5 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
       });
     }
   });
-  return { transactions, links, errors };
+  return { transactions, links, errors, ...(Object.keys(labels).length ? { labels } : {}) };
 }

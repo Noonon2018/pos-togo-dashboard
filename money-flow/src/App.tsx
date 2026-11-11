@@ -6,6 +6,8 @@ import HelpDialog from './components/HelpDialog';
 import SummaryView from './components/SummaryView';
 import { categorize, categoryOf } from './lib/categories';
 import { mergeKind, mergeWarning } from './lib/mergeCheck';
+import { bookKey, isAddressBookCsv, labelsFromTags, parseAddressBook, type AddressBook, type Label } from './lib/addressBook';
+import { computeRoles } from './lib/roles';
 import { useLang, useT } from './i18n';
 import { buildGraph, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
@@ -24,6 +26,8 @@ import {
   saveCycle,
   saveGoal,
   saveProfiles,
+  loadAddressBook,
+  saveAddressBook,
 } from './lib/storage';
 import { DEFAULT_FILTERS, type Aliases, type BankProfile, type Filters, type Transaction } from './lib/types';
 
@@ -49,6 +53,10 @@ export default function App() {
   /** statement periods of imported PDFs, so a statement that ends without a transaction still counts as complete */
   /** last change to names, so it can be undone */
   const [undo, setUndo] = useState<{ msg: string; prev: Aliases } | null>(null);
+  const [book, setBook] = useState<AddressBook>(loadAddressBook);
+  /** edges of a traced money trail, highlighted in the graph */
+  const [trail, setTrail] = useState<string[] | null>(null);
+  const [findQ, setFindQ] = useState('');
   const [stmtRange, setStmtRange] = useState<{ from?: string; to?: string }>({});
   const t = useT();
   const { lang, setLang } = useLang();
@@ -57,6 +65,7 @@ export default function App() {
 
   useEffect(() => saveAliases(aliases), [aliases]);
   useEffect(() => saveProfiles(profiles), [profiles]);
+  useEffect(() => saveAddressBook(book), [book]);
   useEffect(() => saveCategoryOverrides(overrides), [overrides]);
   useEffect(() => saveBudgets(budgets), [budgets]);
   useEffect(() => saveGoal(goal), [goal]);
@@ -66,6 +75,7 @@ export default function App() {
   const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
   const graph = useMemo(() => buildGraph(txns, aliases, filters, links), [txns, aliases, filters, links]);
   const hasData = txns.length + links.length > 0;
+  const roles = useMemo(() => computeRoles(links, book), [links, book]);
   const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
   const dateBounds = useMemo(() => {
     const ds = txns.map((t) => t.date).sort();
@@ -76,7 +86,11 @@ export default function App() {
     const all = [...files];
     const csvs = all.filter((f) => /\.(csv|txt)$/i.test(f.name) || f.type.includes('csv'));
     const pdfs = all.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
-    const read: PendingFile[] = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
+    const texts = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
+    // address books (address,name,type) go straight into the book; everything else to the import step
+    const books = texts.filter((f) => isAddressBookCsv(f.text));
+    const read: PendingFile[] = texts.filter((f) => !isAddressBookCsv(f.text));
+    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     const problems: string[] = [];
     if (pdfs.length) {
       setStatus(t('readingPdf', { n: pdfs.length }));
@@ -95,19 +109,55 @@ export default function App() {
     read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
     if (problems.length) setStatus(problems.join(' · '));
-    else if (!read.length) setStatus(t('unsupported'));
+    else if (!read.length && !books.length) setStatus(t('unsupported'));
     else if (pdfs.length) setStatus('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
+
+  const addToBook = (labels: AddressBook) => {
+    const n = Object.keys(labels).length;
+    if (!n) return;
+    setBook((b) => ({ ...b, ...labels }));
+    setStatus(t('toastBook', { n }));
+  };
+
+  /** Jump to a dot by (part of) its address or name — paste an address from Etherscan. */
+  const findInGraph = () => {
+    const q = findQ.trim().toLowerCase();
+    if (!q) return;
+    const hit =
+      graph.nodes.find((n) => n.id.replace(/^(cp|acct):/, '').toLowerCase() === q || n.label.toLowerCase() === q || book[bookKey(n.id.replace(/^(cp|acct):/, ''))]?.name.toLowerCase() === q) ??
+      graph.nodes.find((n) => n.id.toLowerCase().includes(q) || n.label.toLowerCase().includes(q) || (book[bookKey(n.id.replace(/^(cp|acct):/, ''))]?.name.toLowerCase().includes(q) ?? false));
+    if (hit) {
+      setSelection({ kind: 'node', id: hit.id });
+      setStatus('');
+    } else setStatus(t('findNone', { q: findQ.trim() }));
+  };
+
+  const setLabel = (party: string, label: Label | null) => {
+    setBook((b) => {
+      const next = { ...b };
+      if (label) next[bookKey(party)] = label;
+      else delete next[bookKey(party)];
+      return next;
+    });
+    setStatus(label ? t('toastLabel', { name: label.name }) : t('toastLabelRemoved'));
+    setUndo(null);
+  };
 
   const loadSamples = async () => {
     const entries = await Promise.all(
       Object.entries(sampleFiles).map(async ([path, load]) => ({ name: path.split('/').pop()!, text: (await load()) as string })),
     );
-    setQueue((q) => [...q, ...entries]);
+    const books = entries.filter((e) => isAddressBookCsv(e.text));
+    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
+    setQueue((q) => [...q, ...entries.filter((e) => !isAddressBookCsv(e.text))]);
   };
 
-  const finishImport = (newTx: Transaction[], newLinks: Transaction[], profile: BankProfile | null) => {
+  const finishImport = (newTx: Transaction[], newLinks: Transaction[], profile: BankProfile | null, tags?: Record<string, string>) => {
     const file = queue[0];
+    // name tags inside explorer exports fill the address book, without overwriting names you set
+    if (tags) setBook((b) => ({ ...labelsFromTags(tags), ...b }));
     const linkIds = new Set(links.map((l) => l.id));
     const freshLinks = newLinks.filter((l) => !linkIds.has(l.id));
     if (freshLinks.length) setLinks((cur) => [...cur, ...freshLinks]);
@@ -186,6 +236,7 @@ export default function App() {
     if (!confirm(t('confirmClear'))) return;
     setTxns([]);
     setLinks([]);
+    setTrail(null);
     setSelection(null);
     setFilters(DEFAULT_FILTERS);
     setStmtRange({});
@@ -277,7 +328,7 @@ export default function App() {
             {t('to')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.to ?? ''} onChange={(e) => set({ to: e.target.value || undefined })} />
           </label>
           <label>
-            {t('minAmt')} <input type="number" min={0} step={10} value={filters.minAmount || ''} placeholder="0" onChange={(e) => set({ minAmount: Number(e.target.value) || 0 })} />
+            <span title={t('minAmtTitle')}>{t('minAmt')}</span> <input type="number" min={0} step={10} value={filters.minAmount || ''} placeholder="0" onChange={(e) => set({ minAmount: Number(e.target.value) || 0 })} />
           </label>
           <label>
             {t('flow')}
@@ -290,6 +341,25 @@ export default function App() {
           <label title={t('topNTitle')}>
             {t('topN')} <input type="number" min={0} step={5} value={filters.topN} onChange={(e) => set({ topN: Math.max(0, Number(e.target.value) || 0) })} />
           </label>
+          <input
+            id="graph-find"
+            className="graph-find"
+            list="graph-find-list"
+            placeholder={t('findPh')}
+            value={findQ}
+            onChange={(e) => setFindQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && findInGraph()}
+          />
+          <datalist id="graph-find-list">
+            {graph.nodes
+              .filter((n) => n.kind !== 'other')
+              .slice(0, 300)
+              .map((n) => {
+                const p = n.id.replace(/^(cp|acct):/, '');
+                const l = book[bookKey(p)];
+                return <option key={n.id} value={l ? l.name : n.label} />;
+              })}
+          </datalist>
           <span className="acct-chips">
             {accounts.map((a) => {
               const on = filters.accounts.length === 0 || filters.accounts.includes(a);
@@ -394,10 +464,15 @@ export default function App() {
         </main>
       ) : (
         <main className="workspace">
-          <GraphView ref={graphRef} graph={graph} selected={selection} onSelect={setSelection} />
+          <GraphView ref={graphRef} graph={graph} selected={selection} onSelect={setSelection} book={book} roles={roles} trail={trail} />
           <SidePanel
             txns={filtered}
             links={links}
+            book={book}
+            roles={roles}
+            onLabel={setLabel}
+            onTrace={setTrail}
+            onBookReplace={(b) => setBook(b)}
             aliases={aliases}
             graph={graph}
             accounts={accounts}
@@ -421,6 +496,9 @@ export default function App() {
             </span>
             <span>
               <i className="sw others" /> {t('legOthers')}
+            </span>
+            <span>
+              <i className="sw mixer" /> {t('legMixer')}
             </span>
             <span className="muted">{t('legEdge')}</span>
           </div>

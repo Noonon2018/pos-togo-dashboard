@@ -17,7 +17,7 @@ interface Props {
   remaining: number;
   profiles: BankProfile[];
   accounts: string[];
-  onImport: (txns: Transaction[], links: Transaction[], profile: BankProfile | null) => void;
+  onImport: (txns: Transaction[], links: Transaction[], profile: BankProfile | null, tags?: Record<string, string>) => void;
   onSkip: () => void;
 }
 
@@ -114,7 +114,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
       saveProfile && name
         ? { name, signature: mapping.hasHeader ? headerSignature(parsed.headers) : `noheader:${parsed.headers.length}`, mapping }
         : null;
-    onImport(result.transactions, result.links, profile);
+    onImport(result.transactions, result.links, profile, result.labels);
   };
 
   return (

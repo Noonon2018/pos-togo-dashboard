@@ -18,6 +18,8 @@ export interface Transaction {
   link?: { from: string; to: string };
   /** Crypto unit (ETH, USDC, BTC…). Undefined = US dollars. Crypto never mixes into dollar totals. */
   unit?: string;
+  /** Exact time (ISO, UTC) when the file has one — used to see how fast money moved. */
+  time?: string;
 }
 
 export type AmountMode = 'signed' | 'debitCredit';

@@ -15,13 +15,24 @@ import { amountFmt, money } from '../format';
 import { useT } from '../i18n';
 import { mergeKind } from '../lib/mergeCheck';
 import { resolveAlias } from '../lib/normalize';
-import { isCryptoAddress } from '../lib/csv';
+import { isCryptoAddress, shortAddress } from '../lib/csv';
+import { addressBookCsv, bookKey, displayName, KIND_ICON, KINDS, type AddressBook, type Label, type LabelKind } from '../lib/addressBook';
+import { download } from '../lib/exportCsv';
+import { ROLE_ICON, type Role } from '../lib/roles';
+import { nextToExport, traceFrom, type Hop } from '../lib/trace';
 import type { Selection } from './GraphView';
 
 interface Props {
   txns: Transaction[]; // filtered
   /** flows between other people (graph only) */
   links?: Transaction[];
+  book?: AddressBook;
+  roles?: Map<string, Role[]>;
+  onLabel?: (party: string, label: Label | null) => void;
+  /** highlight these edges in the graph (a traced money trail), or clear */
+  onTrace?: (edgeIds: string[] | null) => void;
+  /** replace the whole address book (used by "Clear") */
+  onBookReplace?: (b: AddressBook) => void;
   aliases: Aliases;
   graph: Graph;
   accounts: string[];
@@ -261,7 +272,7 @@ function Duplicates({ txns, aliases }: Props) {
   );
 }
 
-function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props) {
+function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect, book = {}, onBookReplace }: Props) {
   const tr = useT();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
@@ -340,11 +351,28 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect }: Props
           );
         })}
       </ul>
+      <div className="book-box">
+        <b>📒 {tr('bookTitle')}</b>
+        <div className="book-actions">
+          <span className="small muted">{tr('bookCount', { n: Object.keys(book).length })}</span>
+          {Object.keys(book).length > 0 && (
+            <>
+              <button className="small" onClick={() => download('address-book.csv', addressBookCsv(book))}>
+                {tr('bookExport')}
+              </button>
+              <button className="small danger" onClick={() => confirm(tr('confirmBookClear')) && onBookReplace?.({})}>
+                {tr('bookClear')}
+              </button>
+            </>
+          )}
+        </div>
+        <span className="small muted">{tr('bookHint')}</span>
+      </div>
     </>
   );
 }
 
-function Details({ txns, links = [], aliases, graph, accounts, selection, onSelect, onRename, onUnmerge }: Props & { selection: Selection }) {
+function Details({ txns, links = [], aliases, graph, accounts, selection, onSelect, onRename, onUnmerge, book = {}, roles, onLabel, onTrace }: Props & { selection: Selection }) {
   const [newName, setNewName] = useState('');
   const tr = useT();
   const back = (
@@ -386,10 +414,50 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
   const list = incident.flatMap((e) => e.txIds.map((id) => byId.get(id)!)).filter(Boolean);
   const raws = node.kind === 'counterparty' ? [...new Set(list.filter((t) => counterpartyName(t, aliases) === node.label).map((t) => t.counterparty))] : [];
 
+  const party = node.id.replace(/^(cp|acct):/, '');
+  const isLinkParty = node.kind !== 'other' && links.some((l) => l.link && (l.link.from === party || l.link.to === party));
+  const isAddress = isCryptoAddress(party);
+  const shown = isLinkParty ? displayName(party, book, shortAddress).text : node.label;
+  const partyRoles = roles?.get(party) ?? [];
+  const canTrace = links.some((l) => l.link?.from === party);
+
   return (
     <div className="panel-body">
       {back}
-      <h2>{node.label}</h2>
+      <h2 className="party-name">{shown}</h2>
+      {isAddress && (
+        <div className="addr-line">
+          <code className="addr">{party}</code>
+          <CopyButton text={party} />
+          {/^0x[0-9a-f]{40}$/.test(party) && (
+            <a className="small" href={`https://etherscan.io/address/${party}`} target="_blank" rel="noopener noreferrer">
+              Etherscan ↗
+            </a>
+          )}
+        </div>
+      )}
+      {partyRoles.length > 0 && (
+        <ul className="roles">
+          {partyRoles.map((r) => (
+            <li key={r.id} className={`role ${r.id}`}>
+              <b>
+                {ROLE_ICON[r.id]} {tr(`role_${r.id}` as Parameters<typeof tr>[0])}
+              </b>
+              <span className="small">
+                {tr(`role_${r.id}_why` as Parameters<typeof tr>[0], {
+                  ...r.vars,
+                  ...(typeof r.vars.in === 'number' ? { in: amountFmt(r.vars.in, String(r.vars.unit) === '$' ? undefined : String(r.vars.unit)) } : {}),
+                  ...(typeof r.vars.out === 'number' ? { out: amountFmt(r.vars.out, String(r.vars.unit) === '$' ? undefined : String(r.vars.unit)) } : {}),
+                  ...(r.vars.gap ? { gap: gapText(String(r.vars.gap), tr) } : {}),
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {partyRoles.length > 0 && <p className="small muted roles-note">{tr('rolesNote')}</p>}
+      {isLinkParty && onLabel && <LabelEditor key={party} party={party} current={book[bookKey(party)]} onLabel={onLabel} />}
+      {canTrace && onTrace && <TraceView key={`t-${party}`} start={party} links={links} book={book} graph={graph} onTrace={onTrace} onSelect={onSelect} />}
       <div className="kpis">
         <div>
           <span className="muted small">{node.kind === 'account' ? tr('intoAccount') : tr('theyReceived')}</span>
@@ -405,7 +473,7 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
         </div>
       </div>
 
-      {(node.kind === 'counterparty' || isCryptoAddress(node.id.replace(/^acct:/, ''))) && (
+      {node.kind === 'counterparty' && !isAddress && (
         <>
           <div className="merge-bar">
             <input list="rename-list" placeholder={tr('renamePh')} value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -521,5 +589,151 @@ function MergeHint({ to, txns, aliases, accounts }: { to: string; txns: Transact
     <p className={`merge-hint small ${kind}`}>
       {kind === 'merge' ? '🔗 ' + tr('hintMerge', { to: target }) : kind === 'account' ? '🔁 ' + tr('hintAccount', { to: target }) : '✏️ ' + tr('hintRename', { to: target })}
     </p>
+  );
+}
+
+type TrFn = ReturnType<typeof useT>;
+
+/** "11m" -> "11 นาที" / "11 minutes" */
+function gapText(g: string, tr: TrFn): string {
+  const m = g.match(/^(\d+)([mhd])$/);
+  if (!m) return g;
+  return tr(m[2] === 'm' ? 'gapMin' : m[2] === 'h' ? 'gapHour' : 'gapDay', { n: m[1] });
+}
+
+function CopyButton({ text }: { text: string }) {
+  const tr = useT();
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className="link small"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).then(
+          () => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          },
+          () => undefined,
+        );
+      }}
+    >
+      {done ? tr('copied') : tr('copy')}
+    </button>
+  );
+}
+
+/** Give a party a name and a type; stored in the address book on this computer. */
+function LabelEditor({ party, current, onLabel }: { party: string; current?: Label; onLabel: (p: string, l: Label | null) => void }) {
+  const tr = useT();
+  const [name, setName] = useState(current?.name ?? '');
+  const [kind, setKind] = useState<LabelKind>(current?.kind ?? 'other');
+  return (
+    <div className="label-editor">
+      <span className="small muted">{tr('labelTitle')}</span>
+      <div className="label-row">
+        <input id="label-name" placeholder={tr('labelNamePh')} value={name} onChange={(e) => setName(e.target.value)} />
+        <select id="label-kind" aria-label={tr('labelKind')} value={kind} onChange={(e) => setKind(e.target.value as LabelKind)}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {KIND_ICON[k]} {tr(`kind_${k}` as Parameters<typeof tr>[0])}
+            </option>
+          ))}
+        </select>
+        <button className="primary" disabled={!name.trim()} onClick={() => onLabel(party, { name: name.trim(), kind })}>
+          {tr('save')}
+        </button>
+        {current && (
+          <button className="link small" onClick={() => onLabel(party, null)}>
+            {tr('remove')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Money-trail timeline from one party, forward in time. */
+function TraceView(props: {
+  start: string;
+  links: Transaction[];
+  book: AddressBook;
+  graph: Graph;
+  onTrace: (ids: string[] | null) => void;
+  onSelect: (s: Selection | null) => void;
+}) {
+  const tr = useT();
+  const { start, links, book, graph, onTrace, onSelect } = props;
+  const [hops, setHops] = useState<Hop[] | null>(null);
+  const edgeOf = (h: Hop) => graph.edges.find((e) => e.txIds.includes(h.tx.id))?.id;
+  const run = () => {
+    const h = traceFrom(start, links, book);
+    setHops(h);
+    onTrace(h.map(edgeOf).filter((x): x is string => !!x));
+  };
+  const name = (p: string) => displayName(p, book, shortAddress).text;
+  const missing = hops ? nextToExport(hops) : [];
+  if (!hops) {
+    return (
+      <button className="trace-btn" onClick={run}>
+        🔎 {tr('traceBtn')}
+      </button>
+    );
+  }
+  return (
+    <section className="trace">
+      <div className="trace-head">
+        <h3>🔎 {tr('traceTitle')}</h3>
+        <button
+          className="link small"
+          onClick={() => {
+            setHops(null);
+            onTrace(null);
+          }}
+        >
+          {tr('close')}
+        </button>
+      </div>
+      <p className="small muted">{tr('traceHint')}</p>
+      {hops.length === 0 ? (
+        <p className="muted">{tr('traceNone')}</p>
+      ) : (
+        <ol className="hops">
+          {hops.map((h, i) => {
+            const eid = edgeOf(h);
+            return (
+              <li key={i} style={{ marginLeft: `${(h.depth - 1) * 16}px` }} className={h.stop ? `stop-${h.stop}` : ''}>
+                <button className="hop" onClick={() => eid && onSelect({ kind: 'edge', id: eid })}>
+                  <span className="hop-when small muted">
+                    {(h.tx.time ?? h.tx.date).replace('T', ' ').replace(/:00Z$|Z$/, '')}
+                    {h.gap && <b className={`gap ${h.gapHours !== null && h.gapHours < 1 ? 'fast' : ''}`}> +{gapText(h.gap, tr)}</b>}
+                  </span>
+                  <span className="hop-what">
+                    {name(h.from)} → <b>{name(h.to)}</b>
+                  </span>
+                  <span className="num">{amountFmt(h.amount, h.unit)}</span>
+                </button>
+                {h.stop && h.stop !== 'seen' && <span className={`stop-tag ${h.stop}`}>{tr(`stop_${h.stop}` as Parameters<typeof tr>[0])}</span>}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {missing.length > 0 && (
+        <div className="next-export">
+          <b className="small">{tr('traceNext')}</b>
+          {missing.map((a) => (
+            <div key={a} className="addr-line">
+              <code className="addr">{shortAddress(a)}</code>
+              <CopyButton text={a} />
+              {/^0x[0-9a-f]{40}$/.test(a) && (
+                <a className="small" href={`https://etherscan.io/exportData?type=address&a=${a}`} target="_blank" rel="noopener noreferrer">
+                  {tr('exportOnEtherscan')} ↗
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

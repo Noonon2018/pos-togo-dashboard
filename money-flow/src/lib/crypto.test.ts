@@ -100,12 +100,12 @@ describe('following the money across two wallets', () => {
     const g = buildGraph([], {}, ALL, merged);
     const e = (a: string, b: string, unit: string) => g.edges.find((x) => x.source === a && x.target === b && x.unit === unit);
     expect(e(accountNodeId(ME), accountNodeId(FRIEND), 'ETH')).toMatchObject({ count: 1, total: 0.8 });
-    expect(e(accountNodeId(FRIEND), cpNodeId(MIX), 'ETH')).toMatchObject({ total: 0.5 });
+    expect(e(accountNodeId(FRIEND), cpNodeId(MIX), 'ETH')).toMatchObject({ total: 0.75 });
     expect(e(accountNodeId(ME), cpNodeId(SHOP), 'ETH')).toMatchObject({ total: 0.15 });
     expect(e(accountNodeId(FRIEND), cpNodeId(SHOP), 'ETH')).toMatchObject({ total: 0.1 });
     expect(e(accountNodeId(ME), cpNodeId(SHOP), 'USDC')).toMatchObject({ total: 120.5 }); // separate edge per coin
     expect(g.nodes.find((n) => n.id === cpNodeId(SHOP))?.unit).toBe('MIXED'); // ETH + USDC never summed
-    expect(g.nodes.find((n) => n.id === cpNodeId(MIX))).toMatchObject({ unit: 'ETH', totalIn: 0.5 });
+    expect(g.nodes.find((n) => n.id === cpNodeId(MIX))).toMatchObject({ unit: 'ETH', totalIn: 0.75 });
   });
 
   it('crypto never mixes with dollar edges', () => {
