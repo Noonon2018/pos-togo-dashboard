@@ -12,11 +12,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/tha": "^1.0.0",
     "cytoscape": "^3.35.0",
     "papaparse": "^5.7.0",
     "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/papaparse": "^5.5.2",

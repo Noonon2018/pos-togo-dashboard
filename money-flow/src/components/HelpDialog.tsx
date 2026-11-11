@@ -24,6 +24,7 @@ const TH = [
     p: [
       'กดปุ่มสีน้ำเงิน “+ เพิ่มไฟล์ CSV / PDF” หรือลากไฟล์มาวางในหน้านี้ เลือกหลายไฟล์พร้อมกันได้',
       'จะมีหน้าต่างขึ้นมาทีละไฟล์ ถ้าเป็น PDF ให้ดูกล่องสีเขียว “✓ ยอดใน PDF ตรงกัน” แปลว่าอ่านครบถูกต้อง',
+      '📷 PDF ภาพสแกน: ระบบอ่านจากภาพเอง (ประมาณ 3 วินาทีต่อหน้า อ่านในเครื่องนี้) ถ้าขึ้น ✓ สีเขียวแปลว่าตัวเลขถูก ถ้าขึ้น ⚠ ให้เทียบกับกระดาษ · สแกน 300 dpi ตรงๆ ได้ผลดีที่สุด',
       'ชื่อบัญชี: ใช้ชื่อเดิมทุกเดือน แอปจะรวมเป็นบัญชีเดียว ใส่ไฟล์เดิมซ้ำก็ไม่นับซ้ำ',
       'ดูตารางตัวอย่าง: เงินออกต้องเป็นสีแดง ถ้ายอดซื้อเป็นสีเขียว (มักเป็นบัตรเครดิต) ให้ติ๊ก “กลับเครื่องหมาย”',
       'กด “นำเข้า”',
@@ -153,6 +154,7 @@ const EN = [
     p: [
       'Click the blue “+ Add CSV / PDF” button or drop files on the page (several at once is fine).',
       'For PDFs look for the green “✓ PDF reconciles” box.',
+      '📷 Scanned PDFs are read from the picture (OCR, on this computer, ~3 s per page). Green ✓ = every balance matches; ⚠ = compare with the paper.',
       'Use the same account name every month so statements combine; re-importing a file never double-counts.',
       'Money out must show red. If purchases are green (credit cards), tick “Flip sign”.',
     ],

@@ -12,6 +12,8 @@ export interface PendingFile {
   pdf?: StatementResult;
   /** Suggested account name (sample files) */
   account?: string;
+  /** the PDF was a scan: rows were read by OCR (check the numbers) */
+  ocr?: boolean;
 }
 
 interface Props {
@@ -145,7 +147,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
             </datalist>
           </label>
           {file.pdf ? (
-            <PdfCheck pdf={file.pdf} />
+            <PdfCheck pdf={file.pdf} ocr={file.ocr} />
           ) : (
             <label className="field check">
               <input type="checkbox" checked={mapping.hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
@@ -334,7 +336,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
   );
 }
 
-function PdfCheck({ pdf }: { pdf: StatementResult }) {
+function PdfCheck({ pdf, ocr }: { pdf: StatementResult; ocr?: boolean }) {
   const t = useT();
   const { info, reconcileDiff, balanceMismatches, hasBalance } = pdf;
   const ok = reconcileDiff === 0 && balanceMismatches === 0;
@@ -354,6 +356,7 @@ function PdfCheck({ pdf }: { pdf: StatementResult }) {
       )}
       {balanceMismatches > 0 && <div className="small">{t('pdfMismatch', { n: balanceMismatches })}</div>}
       {!hasBalance && <div className="small">{t('pdfNoBalance')}</div>}
+      {ocr && <div className="small ocr-note">📷 {ok ? t('ocrOk') : t('ocrCheck')}</div>}
     </div>
   );
 }

@@ -130,12 +130,25 @@ export default function App() {
       const { pdfToLines } = await import('./lib/pdfText');
       for (const f of pdfs) {
         try {
-          const pdf = parseStatementLines(await pdfToLines(await f.arrayBuffer()));
+          const buf = await f.arrayBuffer();
+          // pdf.js may take ownership of the buffer: give each reader its own copy
+          const lines = await pdfToLines(buf.slice(0));
+          let pdf = parseStatementLines(lines);
+          let ocr = false;
+          // almost no text = the pages are pictures (a scan): read them with OCR
+          if (!pdf.parsed.rows.length && lines.join('').replace(/\s/g, '').length < 200) {
+            const { ocrPdfToLines } = await import('./lib/pdfOcr');
+            const ocrLines = await ocrPdfToLines(buf.slice(0), ({ page, pages, part }) =>
+              setStatus(t('ocrProgress', { f: f.name, p: page, n: pages, pct: Math.round(part * 100) })),
+            );
+            pdf = parseStatementLines(ocrLines);
+            ocr = true;
+          }
           if (pdf.parsed.rows.length) {
             preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
-            read.push({ name: f.name, text: '', pdf });
+            read.push({ name: f.name, text: '', pdf, ...(ocr ? { ocr } : {}) });
           }
-          else problems.push(t('pdfNoTx', { f: f.name }));
+          else problems.push(t(ocr ? 'ocrNoTx' : 'pdfNoTx', { f: f.name }));
         } catch (e) {
           problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
         }

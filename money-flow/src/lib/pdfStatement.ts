@@ -63,7 +63,7 @@ export function statementInfo(text: string): StatementInfo {
   };
   const acct =
     text.match(/Account (?:Number|No\.?|#)\s*:?\s*[X*\d\s-]*?(\d{4})\b/i) ??
-    text.match(/(?:เลขที่บัญชี|บัญชีเลขที่)\s*:?\s*[\dXx*-]*?(\d{4})(?:-\w)?(?:\s|$)/);
+    text.match(/(?:เลขที่บัญชี|บัญชีเลขที่)\s*:?\s*[\dXx* -]*?(\d{4})(?:-\w)?(?:\s|$)/);
   const bank = /กสิกร|KASIKORN|K ?PLUS/i.test(text)
     ? 'KBank'
     : /ไทยพาณิชย์|\bSCB\b/.test(text)
