@@ -12,7 +12,7 @@ import { fmtGap } from './roles';
 export type StopReason = 'mixer' | 'exchange' | 'cash' | 'noData' | 'maxDepth' | 'seen';
 
 /** Cash withdrawals: the digital trail ends; only witnesses / CCTV / deposit slips can continue it. */
-const isCash = (p: string) => /^(ATM CASH|CASH|CASH WITHDRAWAL|เงินสด.*|ถอนเงินสด.*)$/i.test(p.trim());
+export const isCash = (p: string) => /^(ATM CASH|CASH|CASH WITHDRAWAL|เงินสด.*|ถอนเงินสด.*)$/i.test(p.trim());
 
 export interface Hop {
   depth: number;

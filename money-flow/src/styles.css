@@ -238,6 +238,11 @@ tr.clickable:hover { background: #f9fafb; }
 .role.mixer { background: #111827; color: #f9fafb; }
 .role.exchangeLike { background: #e0f2fe; }
 .role.oneTime { background: #ede9fe; }
+.role.splitOut, .role.splitIn, .role.splitCash { background: #fee2e2; }
+.role.roundTrip { background: #fce7f3; }
+.role.clickable { cursor: pointer; }
+.role.clickable:hover { outline: 2px solid #94a3b8; }
+.redflags { margin-bottom: 10px; }
 .roles-note { margin: 2px 0 6px; }
 .label-editor { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
 .label-row { display: flex; gap: 6px; flex-wrap: wrap; }

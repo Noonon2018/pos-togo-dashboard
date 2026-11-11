@@ -6,8 +6,10 @@ import HelpDialog from './components/HelpDialog';
 import SummaryView from './components/SummaryView';
 import { categorize, categoryOf } from './lib/categories';
 import { mergeKind, mergeWarning } from './lib/mergeCheck';
-import { bookKey, isAddressBookCsv, labelsFromTags, parseAddressBook, type AddressBook, type Label } from './lib/addressBook';
+import { bookKey, displayName, isAddressBookCsv, labelsFromTags, parseAddressBook, type AddressBook, type Label } from './lib/addressBook';
 import { computeRoles } from './lib/roles';
+import { mergeRoles, patternRoles } from './lib/patterns';
+import { shortAddress } from './lib/csv';
 import { useLang, useT } from './i18n';
 import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
@@ -37,6 +39,8 @@ import { DEFAULT_FILTERS, type Aliases, type BankProfile, type Filters, type Tra
 const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
 // fictional Thai foundation case (all names invented)
 const thaiSampleFiles = import.meta.glob('../samples/th/*.csv', { query: '?raw', import: 'default' });
+// fictional case B: splitting, cash withdrawals, a round trip (all names invented)
+const caseBFiles = import.meta.glob('../samples/th-case2/*.csv', { query: '?raw', import: 'default' });
 
 export default function App() {
   const [txns, setTxns] = useState<Transaction[]>([]);
@@ -94,7 +98,15 @@ export default function App() {
     });
     return [...links, ...fromStatements];
   }, [txns, links, aliases]);
-  const roles = useMemo(() => computeRoles(traceLinks, book, { accounts: new Set(accounts) }), [traceLinks, book, accounts]);
+  const roles = useMemo(
+    () =>
+      mergeRoles(
+        computeRoles(traceLinks, book, { accounts: new Set(accounts) }),
+        // 🧩 splitting / 🔁 round trips; "large" means ฿300,000 or $10,000 together
+        patternRoles(traceLinks, { minTotal: cur.cur === 'THB' ? 300_000 : 10_000, name: (p) => displayName(p, book, shortAddress).text }),
+      ),
+    [traceLinks, book, accounts, cur.cur],
+  );
   const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
   const dateBounds = useMemo(() => {
     const ds = txns.map((t) => t.date).sort();
@@ -175,14 +187,15 @@ export default function App() {
     setUndo(null);
   };
 
-  const loadSamples = async (set: 'us' | 'th' = 'us') => {
-    const files = set === 'th' ? thaiSampleFiles : sampleFiles;
+  const loadSamples = async (set: 'us' | 'th' | 'th2' = 'us') => {
+    const files = set === 'th' ? thaiSampleFiles : set === 'th2' ? caseBFiles : sampleFiles;
     keepCurrency.current = set === 'us';
     const entries: PendingFile[] = await Promise.all(
       Object.entries(files).map(async ([path, load]) => ({ name: path.split('/').pop()!, text: (await load()) as string })),
     );
     preferBahtFor(entries.map((e) => e.text).join('\n'));
     if (set === 'th') for (const e of entries) if (e.name === 'foundation-A-bank.csv') e.account = 'มูลนิธิ A (สมมติ)';
+    if (set === 'th2') for (const e of entries) if (e.name === 'personal-account-B.csv') e.account = 'บัญชีส่วนตัว ผู้ก่อตั้ง บี (สมมติ)';
     const books = entries.filter((e) => isAddressBookCsv(e.text));
     if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     setQueue((q) => [...q, ...entries.filter((e) => !isAddressBookCsv(e.text))]);
@@ -467,6 +480,7 @@ export default function App() {
               <button onClick={() => setShowHelp(true)}>📖 {t('openHelp')}</button>
               <button onClick={() => loadSamples('us')}>{t('trySamples')}</button>
               <button onClick={() => loadSamples('th')}>🐾 {t('trySamplesTh')}</button>
+              <button onClick={() => loadSamples('th2')}>🧩 {t('trySamplesTh2')}</button>
             </div>
             <ul>
               <li>{t('empty1')}</li>

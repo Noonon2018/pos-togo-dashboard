@@ -8,7 +8,7 @@ import { isCryptoAddress } from './csv';
  * the files you imported — a hint, never proof.
  */
 
-export type RoleId = 'exchangeLike' | 'passThrough' | 'oneTime' | 'mixer';
+export type RoleId = 'exchangeLike' | 'passThrough' | 'oneTime' | 'mixer' | 'splitOut' | 'splitIn' | 'splitCash' | 'roundTrip';
 
 export interface Role {
   id: RoleId;
@@ -18,7 +18,7 @@ export interface Role {
 
 const ts = (t: Transaction) => Date.parse(t.time ?? `${t.date}T00:00:00Z`);
 
-export const ROLE_ICON: Record<RoleId, string> = { exchangeLike: '🏦', passThrough: '⚡', oneTime: '🆕', mixer: '🌀' };
+export const ROLE_ICON: Record<RoleId, string> = { exchangeLike: '🏦', passThrough: '⚡', oneTime: '🆕', mixer: '🌀', splitOut: '🧩', splitIn: '🧩', splitCash: '💵', roundTrip: '🔁' };
 
 export interface RoleOptions {
   /** money sent on within this many hours counts as "passed through quickly" */

@@ -86,7 +86,51 @@ export default function SidePanel(props: Props) {
 
 const nodeOf = (name: string): Selection => ({ kind: 'node', id: `cp:${name}` });
 
-function Overview({ txns, aliases, onSelect }: Props) {
+/** The explanation line of a role, with amounts in the right currency / coin. */
+function roleWhy(r: Role, tr: ReturnType<typeof useT>): string {
+  const unit = String(r.vars.unit ?? '$') === '$' ? undefined : String(r.vars.unit);
+  const v: Record<string, string | number> = { ...r.vars };
+  for (const k of ['in', 'out', 'total', 'max', 'min', 'back']) if (typeof r.vars[k] === 'number') v[k] = amountFmt(r.vars[k] as number, unit);
+  if (r.vars.gap) v.gap = gapText(String(r.vars.gap), tr);
+  if (typeof r.vars.min === 'number') v.each = r.vars.min === r.vars.max ? v.max : `${v.min}–${v.max}`;
+  return tr(`role_${r.id}_why` as Parameters<typeof tr>[0], v);
+}
+
+/** Parties with a 🧩 / 🔁 / ⚡ hint: what an investigator would open first. */
+function RedFlags({ roles, graph, book = {}, onSelect }: Props) {
+  const tr = useT();
+  const items = useMemo(() => {
+    const order: Role['id'][] = ['splitCash', 'splitOut', 'splitIn', 'roundTrip', 'passThrough'];
+    const list: { party: string; r: Role }[] = [];
+    for (const [party, rs] of roles ?? []) for (const r of rs) if (order.includes(r.id)) list.push({ party, r });
+    const size = (r: Role) => Number(r.vars.total ?? r.vars.back ?? r.vars.out ?? 0);
+    return list.sort((a, b) => order.indexOf(a.r.id) - order.indexOf(b.r.id) || size(b.r) - size(a.r)).slice(0, 12);
+  }, [roles]);
+  if (!items.length) return null;
+  const nodeId = (p: string) => graph.nodes.find((n) => n.id === `acct:${p}` || n.id === `cp:${p}`)?.id ?? graph.nodes.find((n) => n.label === p)?.id;
+  return (
+    <section className="redflags">
+      <h3>⚠️ {tr('redFlags')}</h3>
+      <ul className="roles">
+        {items.map(({ party, r }) => {
+          const id = nodeId(party);
+          return (
+            <li key={`${party}-${r.id}`} className={`role ${r.id}${id ? ' clickable' : ''}`} onClick={() => id && onSelect({ kind: 'node', id })}>
+              <b>
+                {ROLE_ICON[r.id]} {displayName(party, book, shortAddress).text}
+              </b>
+              <span className="small">{roleWhy(r, tr)}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="small muted">{tr('rolesNote')}</p>
+    </section>
+  );
+}
+
+function Overview(props: Props) {
+  const { txns, aliases, onSelect } = props;
   const t = useT();
   const accts = useMemo(() => accountTotals(txns), [txns]);
   const topIn = useMemo(() => topCounterparties(txns, aliases, 'in', 10), [txns, aliases]);
@@ -95,6 +139,7 @@ function Overview({ txns, aliases, onSelect }: Props) {
   const maxIn = topIn[0]?.inflow ?? 1;
   return (
     <>
+      <RedFlags {...props} />
       <h3>{t('accountsRaw')}</h3>
       <table>
         <thead>
@@ -446,12 +491,7 @@ function Details({ txns, links = [], traceLinks = links, aliases, graph, account
                 {ROLE_ICON[r.id]} {tr(`role_${r.id}` as Parameters<typeof tr>[0])}
               </b>
               <span className="small">
-                {tr(`role_${r.id}_why` as Parameters<typeof tr>[0], {
-                  ...r.vars,
-                  ...(typeof r.vars.in === 'number' ? { in: amountFmt(r.vars.in, String(r.vars.unit) === '$' ? undefined : String(r.vars.unit)) } : {}),
-                  ...(typeof r.vars.out === 'number' ? { out: amountFmt(r.vars.out, String(r.vars.unit) === '$' ? undefined : String(r.vars.unit)) } : {}),
-                  ...(r.vars.gap ? { gap: gapText(String(r.vars.gap), tr) } : {}),
-                })}
+                {roleWhy(r, tr)}
               </span>
             </li>
           ))}
