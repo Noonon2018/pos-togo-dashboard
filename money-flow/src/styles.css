@@ -266,3 +266,28 @@ tr.clickable:hover { background: #f9fafb; }
 
 .graph-find { width: 230px; }
 @media (max-width: 700px) { .graph-find { width: 100%; } }
+
+/* cash forecast */
+.fc { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+.fc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fc-head h2 { margin: 0; }
+.fc-unknown { background: #fffbeb; border: 1px solid #fde68a; color: #78350f; border-radius: 10px; padding: 10px 14px; display: grid; gap: 4px; }
+.fc-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.fc-card { display: grid; gap: 6px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+.fc-card.on { border-width: 2px; padding: 11px 13px; }
+.fc-card.bad.on { border-color: var(--out); }
+.fc-card.normal.on { border-color: var(--acct); }
+.fc-card.good.on { border-color: var(--in); }
+.fc-card-title { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.fc-card i, .fc-legend i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; vertical-align: middle; }
+.fc-card input { width: 90px; }
+.fc-chart svg { width: 100%; height: auto; display: block; }
+.fc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; min-height: 20px; }
+.fc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 14px; }
+.fc-form { display: grid; gap: 8px; }
+.fc-form label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: space-between; }
+.fc-form .fc-check { justify-content: flex-start; }
+.fc-table { max-height: 480px; overflow: auto; }
+.fc-neg td { background: #fef2f2; }
+.nowrap { white-space: nowrap; }
+@media (max-width: 860px) { .fc-cards, .fc-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -15,6 +15,8 @@ import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregat
 import { parseStatementLines } from './lib/pdfStatement';
 import { doorDashStatement } from './lib/doordash';
 import Papa from 'papaparse';
+import ForecastView from './components/ForecastView';
+import { isSimulationCsv, parseSimulationCsv, type SimInput } from './lib/forecast';
 import { docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
@@ -57,7 +59,9 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [dragging, setDragging] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [view, setView] = useState<'summary' | 'graph'>('summary');
+  const [view, setView] = useState<'summary' | 'graph' | 'forecast'>('summary');
+  /** a "simulation input" file (cash, sales, bills) for the cash forecast; kept in memory only */
+  const [sim, setSim] = useState<{ input: SimInput; name: string } | null>(null);
   const [overrides, setOverrides] = useState(loadCategoryOverrides);
   const [budgets, setBudgets] = useState(loadBudgets);
   const [goal, setGoal] = useState(loadGoal);
@@ -126,9 +130,16 @@ export default function App() {
     // address books (address,name,type) go straight into the book; everything else to the import step
     const books = texts.filter((f) => isAddressBookCsv(f.text));
     const problems: string[] = [];
+    let simLoaded = false;
     // a summary report saved as CSV (totals, statuses, notes) has nothing to draw: say so instead of an empty import window
     const read: PendingFile[] = texts.filter((f) => {
       if (isAddressBookCsv(f.text)) return false;
+      if (isSimulationCsv(f.text)) {
+        setSim({ input: parseSimulationCsv(f.text), name: f.name });
+        setView('forecast');
+        simLoaded = true;
+        return false;
+      }
       if (looksLikeTransactions(Papa.parse<string[]>(f.text, { skipEmptyLines: 'greedy' }).data.slice(0, 5000))) return true;
       problems.push(t('docNoTx', { f: f.name }));
       return false;
@@ -223,7 +234,8 @@ export default function App() {
     read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
     if (problems.length) setStatus(problems.join(' · '));
-    else if (!read.length && !books.length) setStatus(t('unsupported'));
+    else if (!read.length && !books.length && !simLoaded) setStatus(t('unsupported'));
+    else if (simLoaded && !read.length) setStatus('');
     else if (pdfs.length || docs.length) setStatus('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
@@ -365,6 +377,7 @@ export default function App() {
     if (!confirm(t('confirmClear'))) return;
     setTxns([]);
     setLinks([]);
+    setSim(null);
     setTrail(null);
     setSelection(null);
     setFilters(DEFAULT_FILTERS);
@@ -444,14 +457,23 @@ export default function App() {
         )}
       </header>
 
-      {hasData && (
+      {(hasData || sim) && (
         <nav className="views">
-          <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
-            {t('viewSummary')}
-          </button>
-          <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
-            {t('viewGraph')}
-          </button>
+          {hasData && (
+            <>
+              <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
+                {t('viewSummary')}
+              </button>
+              <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
+                {t('viewGraph')}
+              </button>
+            </>
+          )}
+          {sim && (
+            <button className={view === 'forecast' ? 'active' : ''} onClick={() => setView('forecast')}>
+              {t('viewForecast')}
+            </button>
+          )}
         </nav>
       )}
 
@@ -546,7 +568,18 @@ export default function App() {
         </div>
       )}
 
-      {!hasData ? (
+      {sim && (view === 'forecast' || !hasData) ? (
+        <main className="summary-main">
+          <ForecastView
+            input={sim.input}
+            fileName={sim.name}
+            onClose={() => {
+              setSim(null);
+              setView('summary');
+            }}
+          />
+        </main>
+      ) : !hasData ? (
         <main className="empty">
           <div className="empty-card">
             <h2>{t('emptyTitle')}</h2>
