@@ -105,3 +105,38 @@ describe('parseStatementLines', () => {
     expect(t.reduce((s, x) => s + x.amount, 0)).toBeCloseTo(1739.5, 2);
   });
 });
+
+// Synthetic lines in the shape of a Thai bank statement PDF (fictional data)
+describe('Thai PDF statement', () => {
+  const TH = [
+    'ธนาคารกสิกรไทย',
+    'รายการเดินบัญชี เลขที่บัญชี xxx-x-x5432-x',
+    'ชื่อบัญชี มูลนิธิช่วยสัตว์ ตัวอย่าง',
+    'วันที่ เวลา รายการ ถอนเงิน/ฝากเงิน ยอดคงเหลือ',
+    'ยอดยกมา 100,000.00',
+    '05/03/2567 10:15 รับโอนเงินพร้อมเพย์ จาก นาย ผู้บริจาค 001 5,000.00 105,000.00',
+    '05/03/2567 14:20 โอนเงินไปยัง KTB x1111 นาย ประธาน เอ 30,000.00 75,000.00',
+    '06 มี.ค. 67 09:00 ชำระค่าสินค้าและบริการ คลินิกรักษาสัตว์ สุขใจ 12,500.50 62,499.50',
+    'ยอดยกไป 62,499.50',
+    'หน้า 1/1',
+  ];
+  const r = parseStatementLines(TH, 2026);
+
+  it('reads day-first Buddhist-Era dates, Thai month names, and fixes signs from the balance', () => {
+    expect(r.parsed.rows).toEqual([
+      ['2024-03-05', 'รับโอนเงินพร้อมเพย์ จาก นาย ผู้บริจาค 001', '5000.00', '105000.00'],
+      ['2024-03-05', 'โอนเงินไปยัง KTB x1111 นาย ประธาน เอ', '-30000.00', '75000.00'],
+      ['2024-03-06', 'ชำระค่าสินค้าและบริการ คลินิกรักษาสัตว์ สุขใจ', '-12500.50', '62499.50'],
+    ]);
+  });
+  it('reconciles with ยอดยกมา / ยอดยกไป and names the bank account', () => {
+    expect(r.info).toMatchObject({ bank: 'KBank', last4: '5432', beginning: 100000, ending: 62499.5 });
+    expect(r.reconcileDiff).toBe(0);
+    expect(r.balanceMismatches).toBe(0);
+    expect(r.suggestedAccount).toBe('KBank …5432');
+  });
+  it('without an opening balance, signs come from the previous balance', () => {
+    const x = parseStatementLines(TH.filter((l) => !l.startsWith('ยอดยกมา')), 2026);
+    expect(x.parsed.rows.map((row) => row[2])).toEqual(['5000.00', '-30000.00', '-12500.50']);
+  });
+});

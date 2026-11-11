@@ -67,8 +67,8 @@ export function parseKind(v: string | undefined, name: string): LabelKind {
 export function isAddressBookCsv(text: string): boolean {
   const head = Papa.parse<string[]>(text.replace(/^﻿/, ''), { preview: 1 }).data[0] ?? [];
   const h = head.map((x) => (x ?? '').trim().toLowerCase());
-  const hasAddr = h.some((x) => /^(address|addr|wallet|ที่อยู่|address กระเป๋า)$/.test(x));
-  const hasName = h.some((x) => /^(name|label|tag|name ?tag|ชื่อ|ป้าย)$/.test(x));
+  const hasAddr = h.some((x) => /^(address|addr|wallet|party|ที่อยู่|address กระเป๋า|ชื่อในรายการ|ชื่อบัญชี|บัญชี)$/.test(x));
+  const hasName = h.some((x) => /^(name|label|tag|name ?tag|display ?name|ชื่อ|ป้าย|ชื่อที่แสดง|ชื่อเรียก)$/.test(x));
   const hasMoney = h.some((x) => /amount|value|จำนวน|ยอด|debit|credit/.test(x));
   return hasAddr && hasName && !hasMoney;
 }
@@ -77,8 +77,8 @@ export function isAddressBookCsv(text: string): boolean {
 export function parseAddressBook(text: string): AddressBook {
   const rows = Papa.parse<string[]>(text.replace(/^﻿/, ''), { skipEmptyLines: 'greedy' }).data;
   const head = (rows[0] ?? []).map((x) => (x ?? '').trim().toLowerCase());
-  const iA = head.findIndex((x) => /^(address|addr|wallet|ที่อยู่|address กระเป๋า)$/.test(x));
-  const iN = head.findIndex((x) => /^(name|label|tag|name ?tag|ชื่อ|ป้าย)$/.test(x));
+  const iA = head.findIndex((x) => /^(address|addr|wallet|party|ที่อยู่|address กระเป๋า|ชื่อในรายการ|ชื่อบัญชี|บัญชี)$/.test(x));
+  const iN = head.findIndex((x) => /^(name|label|tag|name ?tag|display ?name|ชื่อ|ป้าย|ชื่อที่แสดง|ชื่อเรียก)$/.test(x));
   const iK = head.findIndex((x) => /^(type|kind|category|ประเภท|ชนิด)$/.test(x));
   const book: AddressBook = {};
   if (iA < 0 || iN < 0) return book;

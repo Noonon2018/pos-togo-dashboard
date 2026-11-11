@@ -9,7 +9,7 @@ import { mergeKind, mergeWarning } from './lib/mergeCheck';
 import { bookKey, isAddressBookCsv, labelsFromTags, parseAddressBook, type AddressBook, type Label } from './lib/addressBook';
 import { computeRoles } from './lib/roles';
 import { useLang, useT } from './i18n';
-import { buildGraph, filterTransactions } from './lib/aggregate';
+import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
 import { parseStatementLines } from './lib/pdfStatement';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
@@ -28,10 +28,15 @@ import {
   saveProfiles,
   loadAddressBook,
   saveAddressBook,
+  loadCurrency,
+  saveCurrency,
 } from './lib/storage';
+import { setCurrency } from './format';
 import { DEFAULT_FILTERS, type Aliases, type BankProfile, type Filters, type Transaction } from './lib/types';
 
 const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
+// fictional Thai foundation case (all names invented)
+const thaiSampleFiles = import.meta.glob('../samples/th/*.csv', { query: '?raw', import: 'default' });
 
 export default function App() {
   const [txns, setTxns] = useState<Transaction[]>([]);
@@ -57,6 +62,11 @@ export default function App() {
   /** edges of a traced money trail, highlighted in the graph */
   const [trail, setTrail] = useState<string[] | null>(null);
   const [findQ, setFindQ] = useState('');
+  /** loading the US example (which contains one Thai-header file) must not flip the currency */
+  const keepCurrency = useRef(false);
+  const [cur, setCur] = useState(loadCurrency);
+  // set before children render so every amount on screen uses it
+  setCurrency(cur.cur);
   const [stmtRange, setStmtRange] = useState<{ from?: string; to?: string }>({});
   const t = useT();
   const { lang, setLang } = useLang();
@@ -66,6 +76,7 @@ export default function App() {
   useEffect(() => saveAliases(aliases), [aliases]);
   useEffect(() => saveProfiles(profiles), [profiles]);
   useEffect(() => saveAddressBook(book), [book]);
+  useEffect(() => saveCurrency(cur), [cur]);
   useEffect(() => saveCategoryOverrides(overrides), [overrides]);
   useEffect(() => saveBudgets(budgets), [budgets]);
   useEffect(() => saveGoal(goal), [goal]);
@@ -75,7 +86,15 @@ export default function App() {
   const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
   const graph = useMemo(() => buildGraph(txns, aliases, filters, links), [txns, aliases, filters, links]);
   const hasData = txns.length + links.length > 0;
-  const roles = useMemo(() => computeRoles(links, book), [links, book]);
+  // bank-statement rows as "from → to" too, so a trail can start at an account and roles see both sides
+  const traceLinks = useMemo(() => {
+    const fromStatements: Transaction[] = txns.map((x) => {
+      const other = counterpartyName(x, aliases);
+      return { ...x, account: '', link: x.amount < 0 ? { from: x.account, to: other } : { from: other, to: x.account } };
+    });
+    return [...links, ...fromStatements];
+  }, [txns, links, aliases]);
+  const roles = useMemo(() => computeRoles(traceLinks, book, { accounts: new Set(accounts) }), [traceLinks, book, accounts]);
   const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
   const dateBounds = useMemo(() => {
     const ds = txns.map((t) => t.date).sort();
@@ -83,10 +102,12 @@ export default function App() {
   }, [txns]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
+    keepCurrency.current = false;
     const all = [...files];
     const csvs = all.filter((f) => /\.(csv|txt)$/i.test(f.name) || f.type.includes('csv'));
     const pdfs = all.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
     const texts = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
+    preferBahtFor(texts.map((x) => x.text).join('\n'));
     // address books (address,name,type) go straight into the book; everything else to the import step
     const books = texts.filter((f) => isAddressBookCsv(f.text));
     const read: PendingFile[] = texts.filter((f) => !isAddressBookCsv(f.text));
@@ -98,7 +119,10 @@ export default function App() {
       for (const f of pdfs) {
         try {
           const pdf = parseStatementLines(await pdfToLines(await f.arrayBuffer()));
-          if (pdf.parsed.rows.length) read.push({ name: f.name, text: '', pdf });
+          if (pdf.parsed.rows.length) {
+            preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
+            read.push({ name: f.name, text: '', pdf });
+          }
           else problems.push(t('pdfNoTx', { f: f.name }));
         } catch (e) {
           problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
@@ -113,6 +137,12 @@ export default function App() {
     else if (pdfs.length) setStatus('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
+
+  /** Thai text in a file → show baht (before the import window opens), unless the user chose a currency. */
+  function preferBahtFor(text: string) {
+    if (keepCurrency.current) return;
+    if (/[\u0E00-\u0E7F]/.test(text)) setCur((c) => (c.manual || c.cur === 'THB' ? c : { cur: 'THB', manual: false }));
+  }
 
   const addToBook = (labels: AddressBook) => {
     const n = Object.keys(labels).length;
@@ -145,10 +175,14 @@ export default function App() {
     setUndo(null);
   };
 
-  const loadSamples = async () => {
-    const entries = await Promise.all(
-      Object.entries(sampleFiles).map(async ([path, load]) => ({ name: path.split('/').pop()!, text: (await load()) as string })),
+  const loadSamples = async (set: 'us' | 'th' = 'us') => {
+    const files = set === 'th' ? thaiSampleFiles : sampleFiles;
+    keepCurrency.current = set === 'us';
+    const entries: PendingFile[] = await Promise.all(
+      Object.entries(files).map(async ([path, load]) => ({ name: path.split('/').pop()!, text: (await load()) as string })),
     );
+    preferBahtFor(entries.map((e) => e.text).join('\n'));
+    if (set === 'th') for (const e of entries) if (e.name === 'foundation-A-bank.csv') e.account = 'มูลนิธิ A (สมมติ)';
     const books = entries.filter((e) => isAddressBookCsv(e.text));
     if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     setQueue((q) => [...q, ...entries.filter((e) => !isAddressBookCsv(e.text))]);
@@ -156,6 +190,10 @@ export default function App() {
 
   const finishImport = (newTx: Transaction[], newLinks: Transaction[], profile: BankProfile | null, tags?: Record<string, string>) => {
     const file = queue[0];
+    // Thai statements → show baht, unless the user picked a currency themselves
+    if (!keepCurrency.current && !cur.manual && cur.cur !== 'THB' && [...newTx, ...newLinks].some((x) => /[\u0E00-\u0E7F]/.test(x.description) && !x.unit)) {
+      setCur({ cur: 'THB', manual: false });
+    }
     // name tags inside explorer exports fill the address book, without overwriting names you set
     if (tags) setBook((b) => ({ ...labelsFromTags(tags), ...b }));
     const linkIds = new Set(links.map((l) => l.id));
@@ -269,6 +307,13 @@ export default function App() {
           {t('addFile')}
         </button>
         <button onClick={() => setShowHelp(true)}>❓ {t('help')}</button>
+        <button
+          className="lang"
+          title={t('currencyTitle')}
+          onClick={() => setCur({ cur: cur.cur === 'THB' ? 'USD' : 'THB', manual: true })}
+        >
+          {cur.cur === 'THB' ? '฿ บาท' : '$ USD'}
+        </button>
         <button className="lang" onClick={() => setLang(lang === 'th' ? 'en' : 'th')} title="ภาษา / Language">
           🌐 {t('lang')}
         </button>
@@ -420,7 +465,8 @@ export default function App() {
                 {t('addFile')}
               </button>
               <button onClick={() => setShowHelp(true)}>📖 {t('openHelp')}</button>
-              <button onClick={loadSamples}>{t('trySamples')}</button>
+              <button onClick={() => loadSamples('us')}>{t('trySamples')}</button>
+              <button onClick={() => loadSamples('th')}>🐾 {t('trySamplesTh')}</button>
             </div>
             <ul>
               <li>{t('empty1')}</li>
@@ -468,6 +514,7 @@ export default function App() {
           <SidePanel
             txns={filtered}
             links={links}
+            traceLinks={traceLinks}
             book={book}
             roles={roles}
             onLabel={setLabel}

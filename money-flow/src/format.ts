@@ -1,15 +1,33 @@
-const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+export type Currency = 'USD' | 'THB';
 
-export const money = (n: number) => usd.format(n);
+/** Display currency for non-crypto amounts (statements carry no currency code; the app setting decides). */
+let CUR: Currency = 'USD';
+export const setCurrency = (c: Currency) => {
+  CUR = c;
+};
+export const currency = () => CUR;
 
-/** Compact money for graph labels: $950, $1.2k, $35k, $1.4M */
+const fmt = {
+  USD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }),
+  THB: new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' }),
+};
+const fmt0 = {
+  USD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }),
+  THB: new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }),
+};
+const SYMBOL: Record<Currency, string> = { USD: '$', THB: '฿' };
+
+export const money = (n: number) => fmt[CUR].format(n);
+
+/** Compact money for graph labels: $950, $1.2k, ฿35k, ฿1.4M */
 export const moneyShort = (n: number) => {
   const a = Math.abs(n);
-  if (a >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (a >= 1e4) return `$${Math.round(n / 1e3)}k`;
-  if (a >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
-  return usd0.format(n);
+  const sym = SYMBOL[CUR];
+  const sign = n < 0 ? '-' : '';
+  if (a >= 1e6) return `${sign}${sym}${(a / 1e6).toFixed(1)}M`;
+  if (a >= 1e4) return `${sign}${sym}${Math.round(a / 1e3)}k`;
+  if (a >= 1e3) return `${sign}${sym}${(a / 1e3).toFixed(1)}k`;
+  return fmt0[CUR].format(n);
 };
 
 const coin = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 });

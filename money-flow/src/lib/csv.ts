@@ -102,6 +102,7 @@ export function parseAmount(raw: string | undefined): number {
 const pad = (n: number) => String(n).padStart(2, '0');
 
 function validDate(y: number, m: number, d: number): string | null {
+  if (y > 2400) y -= 543; // Thai Buddhist Era (พ.ศ.) → CE
   if (y < 100) y += y >= 70 ? 1900 : 2000;
   if (m < 1 || m > 12 || d < 1 || d > 31) return null;
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -109,7 +110,20 @@ function validDate(y: number, m: number, d: number): string | null {
   return `${y}-${pad(m)}-${pad(d)}`;
 }
 
-/** Parse a date into ISO YYYY-MM-DD. "auto" = YYYY-MM-DD if year first, else US M/D/Y. */
+const THAI_MONTHS: [RegExp, number][] = [
+  [/^ม\.?ค\.?$|^มกรา/, 1], [/^ก\.?พ\.?$|^กุมภา/, 2], [/^มี\.?ค\.?$|^มีนา/, 3], [/^เม\.?ย\.?$|^เมษา/, 4],
+  [/^พ\.?ค\.?$|^พฤษภา/, 5], [/^มิ\.?ย\.?$|^มิถุนา/, 6], [/^ก\.?ค\.?$|^กรกฎา/, 7], [/^ส\.?ค\.?$|^สิงหา/, 8],
+  [/^ก\.?ย\.?$|^กันยา/, 9], [/^ต\.?ค\.?$|^ตุลา/, 10], [/^พ\.?ย\.?$|^พฤศจิกา/, 11], [/^ธ\.?ค\.?$|^ธันวา/, 12],
+];
+
+/** Two-digit years in Thai (day-first) files are Buddhist Era: 67 → พ.ศ. 2567 → 2024. */
+const thaiYear = (y: number) => (y < 100 ? (y >= 40 ? 2500 + y : 2000 + y) : y);
+
+/**
+ * Parse a date into ISO YYYY-MM-DD. "auto": YYYY-MM-DD when the year comes first; day-first when the
+ * first number is over 12 or the year is Buddhist Era (Thai banks); otherwise US month/day/year.
+ * Also reads Thai month names ("5 มี.ค. 67", "5 มีนาคม 2567").
+ */
 export function parseDate(raw: string | undefined, format: DateFormat = 'auto'): string | null {
   if (!raw) return null;
   if (/^\d{9,11}$/.test(raw.trim())) {
@@ -117,20 +131,33 @@ export function parseDate(raw: string | undefined, format: DateFormat = 'auto'):
     const d = new Date(Number(raw.trim()) * 1000);
     return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
   }
+  const th = raw.trim().match(/^(\d{1,2})\s*([\u0E00-\u0E7F.]+)\s*(\d{2,4})/);
+  if (th) {
+    const month = THAI_MONTHS.find(([re]) => re.test(th[2]))?.[1];
+    return month ? validDate(thaiYear(Number(th[3])), month, Number(th[1])) : null;
+  }
   const s = raw.trim().split(/[ T]/)[0];
   const parts = s.split(/[/.-]/).map((p) => p.trim());
   if (parts.length !== 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
   const [a, b, c] = parts.map(Number);
   let fmt = format;
-  if (fmt === 'auto') fmt = parts[0].length === 4 ? 'YMD' : 'MDY';
+  if (fmt === 'auto') fmt = parts[0].length === 4 ? 'YMD' : a > 12 || c > 2400 ? 'DMY' : 'MDY';
   switch (fmt) {
     case 'YMD':
       return validDate(a, b, c);
     case 'DMY':
-      return validDate(c, b, a);
+      return validDate(parts[2].length <= 2 ? thaiYear(c) : c, b, a);
     default:
       return validDate(c, a, b);
   }
+}
+
+/** Day-first? True when any date in the sample has a first number over 12 or a Buddhist-Era year. */
+export function looksDayFirst(values: string[]): boolean {
+  return values.some((v) => {
+    const p = v.trim().split(/[ T]/)[0].split(/[/.-]/);
+    return p.length === 3 && p[0].length <= 2 && (Number(p[0]) > 12 || Number(p[2]) > 2400);
+  });
 }
 
 /** Small deterministic hash (FNV-1a) for stable transaction ids. */
@@ -156,15 +183,21 @@ export interface MapResult {
  * Date AND time in ISO (UTC) when the cell has a time: "2026-08-03 18:20:00", "2026-08-03T18:20:00Z",
  * or unix seconds. Null when there is no time part (bank files only have dates).
  */
-export function parseDateTime(raw: string | undefined): string | null {
+export function parseDateTime(raw: string | undefined, format: DateFormat = 'auto'): string | null {
   if (!raw) return null;
   const v = raw.trim();
   if (/^\d{9,11}$/.test(v)) {
     const d = new Date(Number(v) * 1000);
     return Number.isNaN(d.getTime()) ? null : d.toISOString().replace('.000', '');
   }
-  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return null;
+  let m = v.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?/);
+  if (!m) {
+    // "05/03/2567 10:15" (day-first / Thai) → reuse parseDate for the date part
+    const dt = v.match(/^(\S+(?:\s+[\u0E00-\u0E7F.]+\s+\d{2,4})?)\s+(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?/);
+    const iso = dt ? parseDate(dt[1], format) : null;
+    if (!dt || !iso) return null;
+    m = [v, iso.slice(0, 4), iso.slice(5, 7), iso.slice(8, 10), dt[2], dt[3], dt[4]] as unknown as RegExpMatchArray;
+  }
   const [, y, mo, d, h, mi, se] = m;
   const date = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +(se ?? 0)));
   return Number.isNaN(date.getTime()) ? null : date.toISOString().replace('.000', '');
@@ -187,6 +220,7 @@ export function applyMapping(
   const iAmt = col(mapping.amount);
   const iDeb = col(mapping.debit);
   const iCred = col(mapping.credit);
+  const iTime = col(mapping.timeCol);
   const transactions: Transaction[] = [];
   const errors: MapResult['errors'] = [];
   const seen = new Map<string, number>();
@@ -226,7 +260,8 @@ export function applyMapping(
     amount = Math.round(amount * 100) / 100;
     if (amount === 0) return;
     const description = (r[iDesc] ?? '').replace(/\s+/g, ' ').trim();
-    const key = `${account}|${date}|${amount}|${description}`;
+    const time = iTime >= 0 && r[iTime] ? parseDateTime(`${r[iDate]} ${r[iTime]}`, mapping.dateFormat) : null;
+    const key = `${account}|${date}|${amount}|${description}${time ? `|${time}` : ''}`;
     const n = (seen.get(key) ?? 0) + 1;
     seen.set(key, n);
     transactions.push({
@@ -237,6 +272,7 @@ export function applyMapping(
       amount,
       counterparty: normalizeCounterparty(description),
       source,
+      ...(time ? { time } : {}),
     });
   });
   return { transactions, links: [], errors };
@@ -291,8 +327,8 @@ export function guessMapping(headers: string[], hasHeader: boolean, rows: string
   const crypto = fromTo && !!(valueIn || unitCol || (sample.length > 0 && addrRows / sample.length >= 0.6));
   const unitFromHeader = (h: string) => h.match(/\(([A-Z][A-Z0-9]{1,9})\)/)?.[1] ?? '';
 
-  const debit = fromTo ? '' : find(/^debit/i, /withdraw/i);
-  const credit = fromTo ? '' : find(/^credit$/i, /^credit amount/i, /deposit/i);
+  const debit = fromTo ? '' : find(/^debit/i, /withdraw/i, /^ถอน/, /^เดบิต/, /^จ่าย/, /^เงินออก/);
+  const credit = fromTo ? '' : find(/^credit$/i, /^credit amount/i, /deposit/i, /^ฝาก/, /^เครดิต/, /^รับ/, /^เงินเข้า/);
   const date =
     find(/^(transaction |trans\.? )?date$/i, /posting date/i, /post(ed)? date/i, /date/i, /^วันที่|^วัน/, /timestamp/i) ||
     byContent((v) => parseDate(v) !== null) ||
@@ -300,13 +336,17 @@ export function guessMapping(headers: string[], hasHeader: boolean, rows: string
     '';
   const amount = crypto
     ? find(/^(token ?value|tokens? ?transferred|value|quantity|amount)$/i, /^value\b/i, /amount/i)
-    : find(/^amount$/i, /^amount \(total\)/i, /^gross$/i, /amount/i, /^จำนวน|^ยอด/) ||
+    : find(/^amount$/i, /^amount \(total\)/i, /^gross$/i, /amount/i, /^จำนวนเงิน$|^จำนวน$|^ยอดเงิน$|^ยอดโอน$/) ||
       (debit || credit ? '' : byContent((v) => !Number.isNaN(parseAmount(v)), [date]));
   const description = crypto
     ? find(/^method$/i, /^method ?name$/i, /^type$/i, /^note$/i)
     : fromTo
     ? find(/^note$/i, /^memo$/i, /^description$/i, /^รายละเอียด|^หมายเหตุ|^บันทึก/, /^type$/i, /^name$/i)
-    : find(/^description$/i, /description/i, /payee/i, /merchant/i, /memo/i, /details/i) || textiest([date, amount, debit, credit]);
+    : find(/^description$/i, /description/i, /payee/i, /merchant/i, /memo/i, /details/i, /^รายละเอียด|^คำอธิบาย/, /^รายการ/) ||
+      textiest([date, amount, debit, credit]);
+  const timeCol = find(/^(time|เวลา)$/i);
+  const iDateCol = headers.indexOf(date);
+  const dayFirst = iDateCol >= 0 && looksDayFirst(sample.map((r) => r[iDateCol] ?? ''));
   return {
     hasHeader,
     date,
@@ -320,7 +360,8 @@ export function guessMapping(headers: string[], hasHeader: boolean, rows: string
           credit: credit || undefined,
         }),
     invert: false,
-    dateFormat: 'auto',
+    dateFormat: dayFirst ? 'DMY' : 'auto',
+    ...(timeCol ? { timeCol } : {}),
     flow: fromTo ? 'fromTo' : 'account',
     ...(crypto
       ? {
@@ -405,6 +446,7 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
   const iStatus = col(mapping.statusCol);
   const iErr = parsed.headers.findIndex((h) => /^err(or)?[ _]?code$/i.test(h));
   const iHash = col(mapping.hashCol);
+  const iTimeFT = col(mapping.timeCol);
   // explorer exports may carry public name tags next to the addresses
   const iFromTag = parsed.headers.findIndex((h) => /^from[ _]?(name ?tag|nametag|label|name)$/i.test(h) && h !== mapping.from);
   const iToTag = parsed.headers.findIndex((h) => /^to[ _]?(name ?tag|nametag|label|name)$/i.test(h) && h !== mapping.to);
@@ -455,7 +497,7 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
       // addresses stay as names, so the same address in another wallet's file joins up in the graph;
       // `account` holds your wallet address on your own rows (drawn as your wallet), '' otherwise
       const description = [note, hash ? `tx ${hash.slice(0, 10)}…` : '', `${shortAddress(from)} → ${shortAddress(to)}`].filter(Boolean).join(' · ');
-      const time = parseDateTime(r[iDate]);
+      const time = parseDateTime(r[iDate], mapping.dateFormat) ?? (iTimeFT >= 0 && r[iTimeFT] ? parseDateTime(`${r[iDate]} ${r[iTimeFT]}`, mapping.dateFormat) : null);
       if (iFromTag >= 0 && r[iFromTag]?.trim()) labels[from] = r[iFromTag].trim();
       if (iToTag >= 0 && r[iToTag]?.trim()) labels[to] = r[iToTag].trim();
       links.push({
@@ -489,7 +531,7 @@ function applyFromTo(parsed: ParsedCsv, mapping: ColumnMapping, account: string,
         source,
       });
     } else {
-      const time = parseDateTime(r[iDate]);
+      const time = parseDateTime(r[iDate], mapping.dateFormat) ?? (iTimeFT >= 0 && r[iTimeFT] ? parseDateTime(`${r[iDate]} ${r[iTimeFT]}`, mapping.dateFormat) : null);
       links.push({
         id: idFor(`link|${date}|${amt}|${from}|${to}|${note}`),
         account: from,

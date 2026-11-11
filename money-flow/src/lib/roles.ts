@@ -1,6 +1,7 @@
 import type { Transaction } from './types';
 import type { AddressBook } from './addressBook';
 import { bookKey } from './addressBook';
+import { isCryptoAddress } from './csv';
 
 /**
  * Behaviour hints for parties in "from → to" / crypto data. They describe ONLY what is visible in
@@ -26,6 +27,8 @@ export interface RoleOptions {
   passShare?: number;
   /** distinct counterparties to look like an exchange/service */
   hubParties?: number;
+  /** your imported bank accounts: never labelled "looks like an exchange" (they are known) */
+  accounts?: Set<string>;
 }
 
 export function computeRoles(links: Transaction[], book: AddressBook = {}, opt: RoleOptions = {}): Map<string, Role[]> {
@@ -51,7 +54,7 @@ export function computeRoles(links: Transaction[], book: AddressBook = {}, opt: 
     if (book[bookKey(p)]?.kind === 'mixer') add(p, { id: 'mixer', vars: {} });
 
     const partners = new Set([...i.map((t) => t.link!.from), ...o.map((t) => t.link!.to)]);
-    if (partners.size >= hubParties && i.length + o.length >= hubParties * 1.5) add(p, { id: 'exchangeLike', vars: { n: partners.size } });
+    if (!opt.accounts?.has(p) && partners.size >= hubParties && i.length + o.length >= hubParties * 1.5) add(p, { id: 'exchangeLike', vars: { n: partners.size } });
 
     // received X, then sent on most of it (same coin) soon after
     let best: { gapH: number; inAmt: number; outAmt: number; unit: string } | null = null;
@@ -64,10 +67,12 @@ export function computeRoles(links: Transaction[], book: AddressBook = {}, opt: 
         if (!best || gapH < best.gapH) best = { gapH, inAmt: Math.abs(a.amount), outAmt: sent, unit: a.unit ?? '$' };
       }
     }
-    if (best) add(p, { id: 'passThrough', vars: { gap: fmtGap(best.gapH), in: best.inAmt, out: best.outAmt, unit: best.unit } });
+    // your imported accounts pay out the same day all the time (that is their job): no hint there
+    if (best && !opt.accounts?.has(p)) add(p, { id: 'passThrough', vars: { gap: fmtGap(best.gapH), in: best.inAmt, out: best.outAmt, unit: best.unit } });
 
     // seen only once in and at most once out (within the imported data), and not a wallet we exported
-    if (!wallets.has(p) && i.length === 1 && o.length <= 1 && (o.length === 0 || ts(o[0]) - ts(i[0]) <= 7 * 86_400_000) && i.length + o.length >= 2) {
+    // throw-away addresses are a crypto pattern; one-off donors / shops are normal in bank data
+    if (isCryptoAddress(p) && !wallets.has(p) && i.length === 1 && o.length <= 1 && (o.length === 0 || ts(o[0]) - ts(i[0]) <= 7 * 86_400_000) && i.length + o.length >= 2) {
       add(p, { id: 'oneTime', vars: {} });
     }
   }

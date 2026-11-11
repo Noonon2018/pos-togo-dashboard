@@ -114,14 +114,30 @@ describe('traceFrom', () => {
       [2, '0xaaaa', '0x1111', 0.2, 'ETH', '30d', 'seen'], // came back to me
       [1, '0x1111', '0xbbbb', 0.15, 'ETH', '', 'noData'],
       [1, '0x1111', '0xbbbb', 120.5, 'USDC', '', 'noData'],
-      [1, '0x1111', '0xaaaa', 50, 'USDC', '', 'seen'],
+      [1, '0x1111', '0xaaaa', 50, 'USDC', '', 'noData'], // friend's token file not imported yet
       [1, '0x1111', '0xcccc', 1, 'ETH', '', 'exchange'], // only the exchange / police can see further
     ]);
   });
   it('tells you which address to export next', () => {
-    expect(nextToExport(traceFrom(ME, merged, book))).toEqual([SHOP]);
+    expect(nextToExport(traceFrom(ME, merged, book))).toEqual([SHOP, FRIEND]);
   });
   it('without labels, the exchange is just "no more data"', () => {
     expect(traceFrom(ME, merged, {}).find((h) => h.to === EXCH)?.stop).toBe('noData');
+  });
+});
+
+describe('cash withdrawals end the digital trail', () => {
+  it('stops at ATM CASH / เงินสด with its own reason', () => {
+    const mk = (id: string, from: string, to: string, time: string, amount: number): Transaction => ({
+      id, account: '', date: time.slice(0, 10), time, amount: -amount, counterparty: to, description: '', source: '', link: { from, to },
+    });
+    const hops = traceFrom('ACCOUNT A', [
+      mk('1', 'ACCOUNT A', 'CONTRACTOR M', '2025-01-10T10:00:00Z', 2_000_000),
+      mk('2', 'CONTRACTOR M', 'เงินสด (ถอนที่เคาน์เตอร์)', '2025-01-10T13:00:00Z', 2_000_000),
+    ]);
+    expect(hops.map((h) => [h.to, h.gap, h.stop ?? ''])).toEqual([
+      ['CONTRACTOR M', '', ''],
+      ['เงินสด (ถอนที่เคาน์เตอร์)', '3h', 'cash'],
+    ]);
   });
 });

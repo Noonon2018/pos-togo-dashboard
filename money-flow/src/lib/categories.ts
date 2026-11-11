@@ -28,6 +28,9 @@ export const CATEGORIES: Category[] = [
   { id: 'phone', th: 'มือถือ & สาธารณูปโภค', en: 'Phone & utilities', icon: '📱', color: '#0891b2', kind: 'spend', subscription: true },
   { id: 'housing', th: 'ที่อยู่อาศัย', en: 'Housing', icon: '🏠', color: '#0d9488', kind: 'spend' },
   { id: 'insurance', th: 'ประกัน', en: 'Insurance', icon: '🛡️', color: '#475569', kind: 'spend' },
+  { id: 'animal_care', th: 'ค่ารักษาสัตว์', en: 'Vet & animal care', icon: '🐾', color: '#0f766e', kind: 'spend' },
+  { id: 'animal_food', th: 'อาหารสัตว์', en: 'Pet food & supplies', icon: '🦴', color: '#a16207', kind: 'spend' },
+  { id: 'personal', th: 'ค่าใช้จ่ายส่วนตัว / ความงาม', en: 'Personal & beauty', icon: '💄', color: '#be185d', kind: 'spend' },
   { id: 'grocery', th: 'ของชำ', en: 'Groceries', icon: '🛒', color: '#16a34a', kind: 'spend' },
   { id: 'convenience', th: 'ร้านสะดวกซื้อ', en: 'Convenience stores', icon: '🏪', color: '#65a30d', kind: 'spend' },
   { id: 'dining', th: 'อาหารนอกบ้าน & เดลิเวอรี่', en: 'Dining & delivery', icon: '🍜', color: '#ea580c', kind: 'spend' },
@@ -41,6 +44,7 @@ export const CATEGORIES: Category[] = [
   { id: 'other', th: 'อื่นๆ', en: 'Other', icon: '📦', color: '#6b7280', kind: 'spend' },
   { id: 'cash', th: 'ถอนเงินสด', en: 'Cash withdrawals', icon: '💵', color: '#a16207', kind: 'cash' },
   { id: 'invest', th: 'ลงทุน / คริปโต', en: 'Investing / crypto', icon: '📈', color: '#0f766e', kind: 'invest' },
+  { id: 'donation', th: 'เงินบริจาค', en: 'Donations', icon: '🎁', color: '#059669', kind: 'income' },
   { id: 'salary', th: 'เงินเดือน', en: 'Salary', icon: '💼', color: '#15803d', kind: 'income' },
   { id: 'deposit', th: 'ฝากเงิน / ยอดขาย', en: 'Deposits & sales', icon: '🏧', color: '#16a34a', kind: 'income' },
   { id: 'from_people', th: 'รับโอนจากคน', en: 'From people', icon: '🤝', color: '#22c55e', kind: 'income' },
@@ -55,6 +59,19 @@ export const categoryOf = (id: string) => CATEGORY_BY_ID.get(id) ?? CATEGORY_BY_
 
 /** Spending rules, first match wins. Tested against "NAME | DESCRIPTION" (upper case). */
 const SPEND_RULES: [RegExp, string][] = [
+  // Thai + foundation-style rules first (beauty clinics before any "clinic" rule)
+  [/ทำจมูก|ศัลยกรรม|เสริมจมูก|คลินิกความงาม|ความงาม|คอลลาเจน|COLLAGEN|BOTOX|โบท็อก|ฟิลเลอร์|เครื่องสำอาง|COSMETIC|BEAUTY|AESTHETIC/, 'personal'],
+  [/โรงพยาบาลสัตว์|คลินิกรักษาสัตว์|คลินิกสัตว์|สัตวแพทย์|รักษาสัตว์|ทำหมัน|\bVET\b|VETERINARY|ANIMAL HOSPITAL|PET HOSPITAL/, 'animal_care'],
+  [/อาหารสัตว์|อาหารสุนัข|อาหารหมา|อาหารแมว|ทรายแมว|PET ?FOOD|PETSMART|PETCO|CHEWY|PET ?SHOP|เพ็ทช็อป/, 'animal_food'],
+  [/ค่าเช่า|เช่าบ้าน|เช่าที่|เชลเตอร์|SHELTER|หอพัก/, 'housing'],
+  [/เงินเดือน|ค่าจ้าง|ค่าแรง|ประกันสังคม/, 'payroll'],
+  [/การไฟฟ้า|ค่าไฟ|การประปา|ค่าน้ำประปา|\bAIS\b|TRUE MOVE|TRUEMOVE|\bDTAC\b|\b3BB\b|ค่าโทรศัพท์|อินเทอร์เน็ต/, 'phone'],
+  [/แม็คโคร|MAKRO|โลตัส|LOTUS'?S|บิ๊กซี|BIG ?C|ท็อปส์|TOPS MARKET|ตลาดสด/, 'grocery'],
+  [/เซเว่น|แฟมิลี่มาร์ท|FAMILYMART|LAWSON/, 'convenience'],
+  [/ร้านอาหาร|GRAB ?FOOD|LINE ?MAN|FOODPANDA/, 'dining'],
+  [/ปตท|\bPTT\b|บางจาก|เชลล์|น้ำมัน|ทางด่วน|\bBTS\b|\bMRT\b|\bBOLT\b/, 'transport'],
+  [/SHOPEE|LAZADA|ช้อปปี้|ลาซาด้า/, 'shopping'],
+  [/ค่าธรรมเนียม/, 'fees'],
   [/OPENAI|CHATGPT|ANTHROPIC|CLAUDE|\bGROK\b|\bX\.AI\b|\bXAI\b|PERPLEXITY|MIDJOURNEY|GEMINI|COPILOT|CURSOR|\bG1AI|POE\.COM|CHARACTER\.AI|ELEVENLABS|RUNWAY/, 'ai'],
   [/NETFLIX|SPOTIFY|\bHULU\b|DISNEY|YOUTUBE|AMAZON PRIME|\bMAX\b|HBO|PARAMOUNT|PEACOCK|APPLE\b|ICLOUD|MICROSOFT|DROPBOX|ADOBE|AUDIBLE|PATREON/, 'apps'],
   [/HONOR OF KING|STEAM|PLAYSTATION|XBOX|NINTENDO|ROBLOX|RIOT|EPIC GAMES|GARENA|MEBMARKET|GOOGLE PLAY|MOBILE LEGENDS|PUBG|GENSHIN/, 'games'],
@@ -73,7 +90,7 @@ const SPEND_RULES: [RegExp, string][] = [
 ];
 
 const INVEST = /COINBASE|ROBINHOOD|BINANCE|KRAKEN|GEMINI TRUST|CRYPTO\.COM|SCHWAB|FIDELITY|VANGUARD|WEBULL|E\*?TRADE|ACORNS|STASH|\bBITCOIN\b|CASH APP.*BTC/;
-const PERSON_RAILS = /ZELLE|VENMO|CASH APP|PAYPAL|APPLE CASH/;
+const PERSON_RAILS = /ZELLE|VENMO|CASH APP|PAYPAL|APPLE CASH|โอน|พร้อมเพย์|PROMPTPAY/;
 
 /** Auto category for one transaction (before user overrides). */
 export function autoCategory(t: Transaction, name: string, isOwnTransfer: boolean): string {
@@ -82,10 +99,11 @@ export function autoCategory(t: Transaction, name: string, isOwnTransfer: boolea
   if (/TRANSFER (CHK|SAV|ACCT|MMA|CARD|LOC)\b/.test(name)) return 'transfer';
   if (INVEST.test(text)) return 'invest';
   if (t.amount > 0) {
-    if (/PAYROLL|SALARY|DIRECT DEP|GUSTO|\bADP\b|PAYCHEX/.test(text)) return 'salary';
+    if (/บริจาค|DONATION|DONATE|ทำบุญ/.test(text)) return 'donation';
+    if (/PAYROLL|SALARY|DIRECT DEP|GUSTO|\bADP\b|PAYCHEX|เงินเดือน/.test(text)) return 'salary';
     if (/INTEREST/.test(text)) return 'interest';
-    if (/REFUND|RETURN|REVERSAL|CREDIT ADJ|CASHBACK|CASH BACK/.test(text)) return 'refund';
-    if (/DEPOSIT|SQUARE|TOAST|CLOVER|DOORDASH|UBER EATS|GRUBHUB|STRIPE/.test(text)) return 'deposit';
+    if (/REFUND|RETURN|REVERSAL|CREDIT ADJ|CASHBACK|CASH BACK|คืนเงิน/.test(text)) return 'refund';
+    if (/DEPOSIT|SQUARE|TOAST|CLOVER|DOORDASH|UBER EATS|GRUBHUB|STRIPE|ฝากเงิน/.test(text)) return 'deposit';
     if (PERSON_RAILS.test(text)) return 'from_people';
     if (/CARD PAYMENT RECEIVED|PAYMENT THANK YOU/.test(text)) return 'transfer';
     return SPEND_RULES.some(([re]) => re.test(text)) ? 'refund' : 'income_other';

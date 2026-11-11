@@ -176,3 +176,22 @@ describe('saved insight', () => {
     expect(i.vars.amt).toBeCloseTo(s.net, 2);
   });
 });
+
+describe('Thai foundation categories', () => {
+  const cat = (desc: string, amount = -100) => {
+    const t = tx('2024-03-05', amount, desc);
+    return autoCategory(t, t.counterparty, false);
+  };
+  it.each([
+    ['ชำระค่าสินค้าและบริการ คลินิกรักษาสัตว์ สุขใจ', 'animal_care'],
+    ['ชำระค่าสินค้าและบริการ ร้านอาหารสัตว์ ใจดี', 'animal_food'],
+    ['ชำระค่าสินค้าและบริการ คลินิกความงาม ทำจมูก', 'personal'],
+    ['ชำระค่าสินค้าและบริการ ร้านคอลลาเจน', 'personal'],
+    ['โอนเงินไปยัง KBANK x1234 นาย เจ้าของที่ (ค่าเช่าเชลเตอร์)', 'housing'],
+    ['โอนเงินไปยัง KTB x5555 นาง แม่บ้าน วาย', 'people'],
+    ['ถอนเงินสด ATM', 'cash'],
+  ])('%s -> %s', (desc, want) => expect(cat(desc)).toBe(want));
+  it('donations in', () => {
+    expect(cat('รับโอนเงินพร้อมเพย์ จาก นาย ผู้บริจาค 012', 500)).toBe('donation');
+  });
+});

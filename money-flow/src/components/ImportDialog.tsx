@@ -10,6 +10,8 @@ export interface PendingFile {
   text: string;
   /** Set for PDF statements: rows already extracted, plus the reconciliation check. */
   pdf?: StatementResult;
+  /** Suggested account name (sample files) */
+  account?: string;
 }
 
 interface Props {
@@ -50,7 +52,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
   }, [file, profiles]);
 
   const [mapping, setMapping] = useState<ColumnMapping>(initial.mapping);
-  const [account, setAccount] = useState(file.pdf?.suggestedAccount || accountFromFile(file.name));
+  const [account, setAccount] = useState(file.account || file.pdf?.suggestedAccount || accountFromFile(file.name));
   const [profileName, setProfileName] = useState(initial.profileName || accountFromFile(file.name));
   const [saveProfile, setSaveProfile] = useState(!initial.profileName && !file.pdf);
 

@@ -1,4 +1,4 @@
-import { applyMapping, guessMapping, headerSignature, parseAmount, parseCsvText, parseDate } from './csv';
+import { applyMapping, guessMapping, headerSignature, looksDayFirst, parseAmount, parseCsvText, parseDate, parseDateTime } from './csv';
 import type { ColumnMapping } from './types';
 
 describe('parseAmount', () => {
@@ -26,9 +26,21 @@ describe('parseDate', () => {
     expect(parseDate('2026-08-07T00:00:00')).toBe('2026-08-07');
     expect(parseDate('07/08/2026', 'DMY')).toBe('2026-08-07');
   });
+  it('reads Thai bank dates (day first, Buddhist Era, Thai month names)', () => {
+    expect(parseDate('13/01/2026')).toBe('2026-01-13'); // first number > 12 -> day first
+    expect(parseDate('05/03/2567')).toBe('2024-03-05'); // พ.ศ. 2567 = 2024, day first
+    expect(parseDate('05/03/67', 'DMY')).toBe('2024-03-05');
+    expect(parseDate('5 มี.ค. 67')).toBe('2024-03-05');
+    expect(parseDate('5 มีนาคม 2567')).toBe('2024-03-05');
+    expect(parseDate('31 ธ.ค. 2566')).toBe('2023-12-31');
+    expect(looksDayFirst(['05/03/2567'])).toBe(true);
+    expect(looksDayFirst(['03/05/2026', '12/01/2026'])).toBe(false);
+    expect(parseDateTime('05/03/2567 14:05')).toBe('2024-03-05T14:05:00Z');
+  });
   it('rejects impossible dates', () => {
     expect(parseDate('02/30/2026')).toBeNull();
-    expect(parseDate('13/01/2026')).toBeNull();
+    expect(parseDate('13/13/2026')).toBeNull();
+    expect(parseDate('31/02/2567')).toBeNull();
     expect(parseDate('hello')).toBeNull();
     expect(parseDate('')).toBeNull();
   });

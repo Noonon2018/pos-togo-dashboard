@@ -46,3 +46,8 @@ export const saveCycle = (c: { day: number; manual: boolean }) => write(CYCLE, c
 const BOOK = 'moneyflow.addressbook.v1';
 export const loadAddressBook = () => read<import('./addressBook').AddressBook>(BOOK, {});
 export const saveAddressBook = (b: import('./addressBook').AddressBook) => write(BOOK, b);
+
+// Display currency for statements ($ or ฿). manual = the user picked it (don't auto-switch).
+const CURRENCY = 'moneyflow.currency.v1';
+export const loadCurrency = () => read<{ cur: 'USD' | 'THB'; manual: boolean }>(CURRENCY, { cur: 'USD', manual: false });
+export const saveCurrency = (c: { cur: 'USD' | 'THB'; manual: boolean }) => write(CURRENCY, c);

@@ -1,5 +1,5 @@
 import type { ParsedCsv } from './csv';
-import { parseAmount } from './csv';
+import { parseAmount, parseDate } from './csv';
 
 /**
  * Turn the text lines of a bank statement PDF into rows the normal import step understands
@@ -37,7 +37,10 @@ const MONEY = /^\(?-?\$?\d{1,3}(,\d{3})*\.\d{2}\)?-?$|^\(?-?\$?\d+\.\d{2}\)?-?$/
 const START = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+(.*)$/;
 // lines that end a transaction block (headers, footers, totals, statement boilerplate)
 const STOP =
-  /^(ending balance|beginning balance|total\b|page \d+ of|transaction detail|date\s+description|\*start\*|\*end\*|in case of errors|daily ending balance|checking summary|service fee|this page intentionally)/i;
+  /^(ending balance|beginning balance|total\b|page \d+ of|transaction detail|date\s+description|\*start\*|\*end\*|in case of errors|daily ending balance|checking summary|service fee|this page intentionally|ยอดยกมา|ยอดยกไป|ยอดคงเหลือยก|รวม|หน้าที่|หน้า \d|วันที่\s+(เวลา\s+)?รายการ)/i;
+// Thai statements: "05 มี.ค. 67 ..." (Thai month name)
+const START_TH = /^(\d{1,2})\s+([\u0E00-\u0E7F.]{2,10})\s+(\d{2,4})\s+(.*)$/;
+const THAI = /[\u0E00-\u0E7F]/;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -58,8 +61,20 @@ export function statementInfo(text: string): StatementInfo {
     const m = text.match(re);
     return m ? parseAmount(m[1]) : null;
   };
-  const acct = text.match(/Account (?:Number|No\.?|#)\s*:?\s*[X*\d\s-]*?(\d{4})\b/i);
-  const bank = /\bchase\b/i.test(text)
+  const acct =
+    text.match(/Account (?:Number|No\.?|#)\s*:?\s*[X*\d\s-]*?(\d{4})\b/i) ??
+    text.match(/(?:เลขที่บัญชี|บัญชีเลขที่)\s*:?\s*[\dXx*-]*?(\d{4})(?:-\w)?(?:\s|$)/);
+  const bank = /กสิกร|KASIKORN|K ?PLUS/i.test(text)
+    ? 'KBank'
+    : /ไทยพาณิชย์|\bSCB\b/.test(text)
+      ? 'SCB'
+      : /กรุงไทย|KRUNGTHAI/i.test(text)
+        ? 'KTB'
+        : /กรุงศรี|KRUNGSRI/i.test(text)
+          ? 'Krungsri'
+          : /กรุงเทพ|BANGKOK BANK/i.test(text)
+            ? 'BBL'
+            : /\bchase\b/i.test(text)
     ? 'Chase'
     : /bank of america/i.test(text)
       ? 'BofA'
@@ -81,8 +96,12 @@ export function statementInfo(text: string): StatementInfo {
     product,
     periodStart: iso(ps),
     periodEnd: iso(pe),
-    beginning: money(/Beginning Balance\s*\$?\s*(-?[\d,]+\.\d{2})/i),
-    ending: money(/Ending Balance\s*\$?\s*(-?[\d,]+\.\d{2})/i),
+    beginning:
+      money(/Beginning Balance\s*\$?\s*(-?[\d,]+\.\d{2})/i) ??
+      money(/(?:ยอดยกมา|ยอดคงเหลือยกมา|BALANCE B\/F|BROUGHT FORWARD)\s*:?\s*(-?[\d,]+\.\d{2})/i),
+    ending:
+      money(/Ending Balance\s*\$?\s*(-?[\d,]+\.\d{2})/i) ??
+      money(/(?:ยอดยกไป|ยอดคงเหลือยกไป|BALANCE C\/F|CARRIED FORWARD)\s*:?\s*(-?[\d,]+\.\d{2})/i),
   };
 }
 
@@ -100,13 +119,23 @@ export function parseStatementLines(lines: string[], fallbackYear = new Date().g
   const info = statementInfo(text);
 
   // 1) group lines into blocks that start with a date
-  const blocks: { m: number; d: number; y?: number; parts: string[] }[] = [];
+  const thaiDoc = THAI.test(text); // Thai statements write day/month/(Buddhist-Era) year
+  const blocks: { m: number; d: number; y?: number; iso?: string; parts: string[] }[] = [];
   let cur: (typeof blocks)[number] | null = null;
   for (const raw of lines) {
     const line = raw.replace(/\s+/g, ' ').trim();
     if (!line) continue;
     const st = line.match(START);
-    if (st && Number(st[1]) <= 12 && Number(st[2]) <= 31) {
+    const th = thaiDoc ? line.match(START_TH) : null;
+    const thIso = th ? parseDate(`${th[1]} ${th[2]} ${th[3]}`) : null;
+    if (th && thIso) {
+      cur = { m: 0, d: 0, iso: thIso, parts: [th[4]] };
+      blocks.push(cur);
+    } else if (st && thaiDoc && Number(st[1]) <= 31 && Number(st[2]) <= 12) {
+      const iso = st[3] ? parseDate(`${st[1]}/${st[2]}/${st[3]}`, 'DMY') : null;
+      cur = { m: Number(st[2]), d: Number(st[1]), ...(iso ? { iso } : {}), parts: [st[4]] };
+      blocks.push(cur);
+    } else if (st && Number(st[1]) <= 12 && Number(st[2]) <= 31) {
       cur = { m: Number(st[1]), d: Number(st[2]), y: st[3] ? Number(st[3]) : undefined, parts: [st[4]] };
       blocks.push(cur);
     } else if (STOP.test(line)) {
@@ -123,6 +152,7 @@ export function parseStatementLines(lines: string[], fallbackYear = new Date().g
     // pdf.js often splits the sign from the number ("- 14.70", "$ 1,000.00"): glue them back
     const tokens = b.parts
       .join(' ')
+      .replace(/^\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s+/, '') // time column ("10:15") before the description
       .replace(/(^|\s)(-|\$|-\$)\s+(?=[\d$])/g, '$1$2')
       .split(' ');
     const money: number[] = [];
@@ -135,8 +165,9 @@ export function parseStatementLines(lines: string[], fallbackYear = new Date().g
     const amount = money.length >= 2 ? money[money.length - 2] : money[0];
     const balance = money.length >= 2 ? money[money.length - 1] : null;
     let y = b.y ?? yearFor(b.m, info, fallbackYear);
+    if (y > 2400) y -= 543;
     if (y < 100) y += 2000;
-    rows.push({ date: `${y}-${pad(b.m)}-${pad(b.d)}`, desc: desc.join(' '), amount, balance });
+    rows.push({ date: b.iso ?? `${y}-${pad(b.m)}-${pad(b.d)}`, desc: desc.join(' '), amount, balance });
   }
 
   // 3) with a balance column, trust the balance to fix signs and to check the extraction
@@ -153,6 +184,19 @@ export function parseStatementLines(lines: string[], fallbackYear = new Date().g
       if (Math.abs(diff) === Math.abs(r.amount) && diff !== r.amount) r.amount = diff; // sign printed without "-"
       if (Math.abs(run + r.amount - r.balance) > 0.005) mismatches++;
       run = r.balance;
+    }
+  } else if (hasBalance) {
+    // no opening balance printed: use the previous row's balance; for the first row, guess from the words
+    let prev: number | null = null;
+    for (const r of rows) {
+      if (prev !== null && r.balance !== null) {
+        const diff = Math.round((r.balance - prev) * 100) / 100;
+        if (Math.abs(diff) === Math.abs(r.amount) && diff !== r.amount) r.amount = diff;
+        else if (Math.abs(prev + r.amount - r.balance) > 0.005) mismatches++;
+      } else if (prev === null && r.amount > 0 && /ถอน|โอนไป|โอนเงินไป|ชำระ|จ่าย|ค่าธรรมเนียม|WITHDRAW|PAYMENT|DEBIT/i.test(r.desc)) {
+        r.amount = -r.amount;
+      }
+      if (r.balance !== null) prev = r.balance;
     }
   }
   const net = rows.reduce((s, r) => s + r.amount, 0);

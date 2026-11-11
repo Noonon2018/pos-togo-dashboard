@@ -38,6 +38,8 @@ export interface ColumnMapping {
   /** Flip sign (credit-card exports often show purchases as positive). */
   invert: boolean;
   dateFormat: DateFormat;
+  /** Separate time column (Thai bank exports: วันที่ + เวลา). */
+  timeCol?: string;
   /** Lines to skip before the header row (title lines in Venmo-style exports). */
   skipRows?: number;
   /** 'fromTo' = each row says who paid whom (columns `from` and `to`). */

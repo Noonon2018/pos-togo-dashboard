@@ -342,6 +342,19 @@ export function insights(all: CategorizedTx[], aliases: Aliases, period: string,
   if (cash >= 100 && cash >= s.spending * 0.03) out.push({ id: 'cash', level: 'info', key: 'insCash', vars: { amt: cash, pct: s.spending > 0 ? Math.round((cash / s.spending) * 100) : 0 }, focus: { kind: 'category', value: 'cash' } });
   if (s.invest > 0) out.push({ id: 'invest', level: 'info', key: 'insInvest', vars: { amt: s.invest, pct: s.income > 0 ? Math.round((s.invest / s.income) * 100) : 0 }, focus: { kind: 'category', value: 'invest' } });
 
+  // a large share of all spending went to ONE person (bank transfers / Zelle / PromptPay)
+  const people = s.spendCategories.find((c) => c.id === 'people');
+  const topPerson = people?.items[0];
+  if (topPerson && s.spending > 0 && topPerson.total / s.spending >= 0.2) {
+    out.push({
+      id: `person-${topPerson.name}`,
+      level: 'warn',
+      key: 'insTopPerson',
+      vars: { name: topPerson.name, amt: topPerson.total, n: topPerson.count, pct: Math.round((topPerson.total / s.spending) * 100) },
+      focus: { kind: 'name', value: topPerson.name },
+    });
+  }
+
   // biggest category
   const top = s.spendCategories[0];
   if (top && top.share >= 0.25) out.push({ id: 'top', level: 'info', key: 'insTopCategory', vars: { cat: top.id, amt: top.total, pct: Math.round(top.share * 100) }, focus: { kind: 'category', value: top.id } });

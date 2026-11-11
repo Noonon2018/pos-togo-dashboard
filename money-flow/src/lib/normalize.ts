@@ -78,7 +78,48 @@ const PREFIXES: RegExp[] = [
   /^(SQ|TST|SP|PP|PAYPAL|DD|IN|BT)\s?\*\s*/,
 ];
 
+const THAI = /[\u0E00-\u0E7F]/;
+const TH_BANKS =
+  /\b(KBANK|KBNK|SCB|KTB|BBL|BAY|TTB|TMB|GSB|KKP|CIMB|UOB|LHB|LH BANK|TISCO|ICBC|BAAC|GHB)\b|กสิกรไทย|กสิกร|ไทยพาณิชย์|กรุงไทย|กรุงเทพ|กรุงศรี(อยุธยา)?|ทีทีบี|ทหารไทยธนชาต|ออมสิน|ธ\.ก\.ส\.|เกียรตินาคิน|ซีไอเอ็มบี|ยูโอบี|แลนด์ แอนด์ เฮ้าส์/g;
+const TH_ACTIONS = [
+  /^(รายการ)?รับโอน(เงิน)?(พร้อมเพย์|PROMPTPAY)?( ?(จาก|จ\.))?/,
+  /^(รายการ)?โอน(เงิน)?(พร้อมเพย์|PROMPTPAY)?( ?(ไป(ยัง)?|ให้|ถึง))?/,
+  /^ชำระ(เงิน)?(ค่า)?(สินค้า)?(และ|\/)?(บริการ)?( ?(ให้|ที่|ผ่าน))?/,
+  /^(จ่าย|ชำระ)บิล( ?(ให้|ที่))?/,
+  /^(ฝาก|ถอน)(เงิน)?(สด)?( ?(จาก|โดย))?/,
+  /^(รับ|จ่าย)(เงิน)?( ?(จาก|ให้))?/,
+  /^(พร้อมเพย์|PROMPTPAY|PROMPT PAY)( ?(จาก|ไป|ให้))?/,
+  /^(ผ่าน|ทาง)\s*(K ?PLUS|SCB EASY|KRUNGTHAI NEXT|BUALUANG|KMA|MAKE|TTB TOUCH|MYMO|แอป|โมบายแบงก์กิ้ง|ATM|เคาน์เตอร์)/,
+];
+const TH_TITLES = /(^|\s)(นาย|นางสาว|นาง|น\.ส\.|ด\.ช\.|ด\.ญ\.|คุณ|MR\.?|MRS\.?|MS\.?|MISS)(?=\s|[\u0E00-\u0E7F])/g;
+
+/**
+ * Thai bank descriptions: "รับโอนจาก KBANK x1234 นาย สมชาย ใจดี" -> "สมชาย ใจดี",
+ * "ถอนเงินสด ATM" -> "ATM CASH". Bank names, account masks, phone numbers and titles are removed.
+ */
+export function normalizeThai(description: string): string {
+  let s = ` ${description} `.replace(/\s+/g, ' ').toUpperCase();
+  if (/ถอนเงินสด|ถอนสด|\bATM\b.*ถอน|ถอน.*\bATM\b|กดเงินสด/.test(s)) return 'ATM CASH';
+  if (/ดอกเบี้ย/.test(s)) return 'INTEREST';
+  if (/ค่าธรรมเนียม/.test(s)) return 'ค่าธรรมเนียมธนาคาร';
+  s = s.trim();
+  for (let pass = 0; pass < 3; pass++) for (const re of TH_ACTIONS) s = s.replace(re, '').trim();
+  s = s
+    .replace(TH_BANKS, ' ')
+    .replace(/\b(X{1,}|\*{1,})[-\s]?\d{3,}\b|\bX+[-X]*\d+[-X]*\b|\b\d{3}-\d-\d{5}-\d\b|\b\d{10,}\b/g, ' ') // account numbers
+    .replace(/\b0\d{1,2}-?\d{3}-?\d{4}\b|\b0\dX-XXX-\d{4}\b/g, ' ') // phone numbers (PromptPay)
+    .replace(/\b(REF|อ้างอิง)\b\s*[:#]?\s*\S+/g, ' ')
+    .replace(TH_TITLES, ' ')
+    .replace(/\s*\([^)]*\)\s*$/, '') // trailing note "(ค่าเช่าเชลเตอร์)" is not part of the name
+    .replace(/[^A-Z0-9&'.+\-()\u0E00-\u0E7F ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.\-]+|[\s.\-]+$/g, '')
+    .trim();
+  return s || description.trim() || 'UNKNOWN';
+}
+
 export function normalizeCounterparty(description: string): string {
+  if (THAI.test(description)) return normalizeThai(description);
   let s = ` ${description.toUpperCase()} `.replace(/\s+/g, ' ');
 
   // Chase / BofA ACH format: "ORIG CO NAME:XYZ ORIG ID:..." -> XYZ

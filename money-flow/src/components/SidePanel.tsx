@@ -26,6 +26,8 @@ interface Props {
   txns: Transaction[]; // filtered
   /** flows between other people (graph only) */
   links?: Transaction[];
+  /** links + bank-statement rows as from → to (for tracing and roles) */
+  traceLinks?: Transaction[];
   book?: AddressBook;
   roles?: Map<string, Role[]>;
   onLabel?: (party: string, label: Label | null) => void;
@@ -372,7 +374,7 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect, book = 
   );
 }
 
-function Details({ txns, links = [], aliases, graph, accounts, selection, onSelect, onRename, onUnmerge, book = {}, roles, onLabel, onTrace }: Props & { selection: Selection }) {
+function Details({ txns, links = [], traceLinks = links, aliases, graph, accounts, selection, onSelect, onRename, onUnmerge, book = {}, roles, onLabel, onTrace }: Props & { selection: Selection }) {
   const [newName, setNewName] = useState('');
   const tr = useT();
   const back = (
@@ -415,11 +417,11 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
   const raws = node.kind === 'counterparty' ? [...new Set(list.filter((t) => counterpartyName(t, aliases) === node.label).map((t) => t.counterparty))] : [];
 
   const party = node.id.replace(/^(cp|acct):/, '');
-  const isLinkParty = node.kind !== 'other' && links.some((l) => l.link && (l.link.from === party || l.link.to === party));
+  const isLinkParty = node.kind !== 'other' && traceLinks.some((l) => l.link && (l.link.from === party || l.link.to === party));
   const isAddress = isCryptoAddress(party);
   const shown = isLinkParty ? displayName(party, book, shortAddress).text : node.label;
   const partyRoles = roles?.get(party) ?? [];
-  const canTrace = links.some((l) => l.link?.from === party);
+  const canTrace = traceLinks.some((l) => l.link?.from === party);
 
   return (
     <div className="panel-body">
@@ -457,7 +459,7 @@ function Details({ txns, links = [], aliases, graph, accounts, selection, onSele
       )}
       {partyRoles.length > 0 && <p className="small muted roles-note">{tr('rolesNote')}</p>}
       {isLinkParty && onLabel && <LabelEditor key={party} party={party} current={book[bookKey(party)]} onLabel={onLabel} />}
-      {canTrace && onTrace && <TraceView key={`t-${party}`} start={party} links={links} book={book} graph={graph} onTrace={onTrace} onSelect={onSelect} />}
+      {canTrace && onTrace && <TraceView key={`t-${party}`} start={party} links={traceLinks} book={book} graph={graph} onTrace={onTrace} onSelect={onSelect} />}
       <div className="kpis">
         <div>
           <span className="muted small">{node.kind === 'account' ? tr('intoAccount') : tr('theyReceived')}</span>
