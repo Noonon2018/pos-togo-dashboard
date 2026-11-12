@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Money-flow analyzer: real statements stay local
+money-flow/data/*
+!money-flow/data/.gitkeep

@@ -1,0 +1,6 @@
+node_modules
+dist
+# Real bank statements — never commit
+data/*
+!data/.gitkeep
+*.local

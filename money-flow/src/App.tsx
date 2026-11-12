@@ -1,0 +1,719 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import GraphView, { type GraphHandle, type Selection } from './components/GraphView';
+import ImportDialog, { type PendingFile } from './components/ImportDialog';
+import SidePanel from './components/SidePanel';
+import HelpDialog from './components/HelpDialog';
+import SummaryView from './components/SummaryView';
+import { categorize, categoryOf } from './lib/categories';
+import { mergeKind, mergeWarning } from './lib/mergeCheck';
+import { bookKey, displayName, isAddressBookCsv, labelsFromTags, parseAddressBook, type AddressBook, type Label } from './lib/addressBook';
+import { computeRoles } from './lib/roles';
+import { mergeRoles, patternRoles } from './lib/patterns';
+import { shortAddress } from './lib/csv';
+import { useLang, useT } from './i18n';
+import { buildGraph, counterpartyName, filterTransactions } from './lib/aggregate';
+import { parseStatementLines } from './lib/pdfStatement';
+import { doorDashStatement } from './lib/doordash';
+import Papa from 'papaparse';
+import ForecastView from './components/ForecastView';
+import FileCheckCard from './components/FileCheckCard';
+import { reconciles, whyNotTransactions, type FileCheck } from './lib/fileCheck';
+import { isSimulationCsv, parseSimulationCsv, type SimInput } from './lib/forecast';
+import { countTxRows, docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
+import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
+import { renameCounterparty, unmerge } from './lib/rename';
+import {
+  loadAliases,
+  loadBudgets,
+  loadCategoryOverrides,
+  loadCycle,
+  loadGoal,
+  loadProfiles,
+  saveAliases,
+  saveBudgets,
+  saveCategoryOverrides,
+  saveCycle,
+  saveGoal,
+  saveProfiles,
+  loadAddressBook,
+  saveAddressBook,
+  loadCurrency,
+  saveCurrency,
+} from './lib/storage';
+import { setCurrency } from './format';
+import { DEFAULT_FILTERS, type Aliases, type BankProfile, type Filters, type Transaction } from './lib/types';
+
+const sampleFiles = import.meta.glob('../samples/*.csv', { query: '?raw', import: 'default' });
+// fictional Thai foundation case (all names invented)
+const thaiSampleFiles = import.meta.glob('../samples/th/*.csv', { query: '?raw', import: 'default' });
+// fictional case B: splitting, cash withdrawals, a round trip (all names invented)
+const caseBFiles = import.meta.glob('../samples/th-case2/*.csv', { query: '?raw', import: 'default' });
+
+export default function App() {
+  const [txns, setTxns] = useState<Transaction[]>([]);
+  /** flows between other people from "from → to" files (graph only) */
+  const [links, setLinks] = useState<Transaction[]>([]);
+  const [queue, setQueue] = useState<PendingFile[]>([]);
+  const [profiles, setProfiles] = useState<BankProfile[]>(loadProfiles);
+  const [aliases, setAliases] = useState(loadAliases);
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [status, setStatus] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [view, setView] = useState<'summary' | 'graph' | 'forecast'>('summary');
+  /** a "simulation input" file (cash, sales, bills) for the cash forecast; kept in memory only */
+  const [sim, setSim] = useState<{ input: SimInput; name: string } | null>(null);
+  /** result of the last files dropped: what each one is and whether it can be used */
+  const [fileChecks, setFileChecks] = useState<FileCheck[]>([]);
+  const [overrides, setOverrides] = useState(loadCategoryOverrides);
+  const [budgets, setBudgets] = useState(loadBudgets);
+  const [goal, setGoal] = useState(loadGoal);
+  const [cycle, setCycle] = useState(loadCycle);
+  /** statement periods of imported PDFs, so a statement that ends without a transaction still counts as complete */
+  /** last change to names, so it can be undone */
+  const [undo, setUndo] = useState<{ msg: string; prev: Aliases } | null>(null);
+  const [book, setBook] = useState<AddressBook>(loadAddressBook);
+  /** edges of a traced money trail, highlighted in the graph */
+  const [trail, setTrail] = useState<string[] | null>(null);
+  const [findQ, setFindQ] = useState('');
+  /** loading the US example (which contains one Thai-header file) must not flip the currency */
+  const keepCurrency = useRef(false);
+  const [cur, setCur] = useState(loadCurrency);
+  // set before children render so every amount on screen uses it
+  setCurrency(cur.cur);
+  const [stmtRange, setStmtRange] = useState<{ from?: string; to?: string }>({});
+  const t = useT();
+  const { lang, setLang } = useLang();
+  const graphRef = useRef<GraphHandle>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => saveAliases(aliases), [aliases]);
+  useEffect(() => saveProfiles(profiles), [profiles]);
+  useEffect(() => saveAddressBook(book), [book]);
+  useEffect(() => saveCurrency(cur), [cur]);
+  useEffect(() => saveCategoryOverrides(overrides), [overrides]);
+  useEffect(() => saveBudgets(budgets), [budgets]);
+  useEffect(() => saveGoal(goal), [goal]);
+  useEffect(() => saveCycle(cycle), [cycle]);
+
+  const accounts = useMemo(() => [...new Set(txns.map((t) => t.account))].sort(), [txns]);
+  const filtered = useMemo(() => filterTransactions(txns, filters), [txns, filters]);
+  const graph = useMemo(() => buildGraph(txns, aliases, filters, links), [txns, aliases, filters, links]);
+  const hasData = txns.length + links.length > 0;
+  // bank-statement rows as "from → to" too, so a trail can start at an account and roles see both sides
+  const traceLinks = useMemo(() => {
+    const fromStatements: Transaction[] = txns.map((x) => {
+      const other = counterpartyName(x, aliases);
+      return { ...x, account: '', link: x.amount < 0 ? { from: x.account, to: other } : { from: other, to: x.account } };
+    });
+    return [...links, ...fromStatements];
+  }, [txns, links, aliases]);
+  const roles = useMemo(
+    () =>
+      mergeRoles(
+        computeRoles(traceLinks, book, { accounts: new Set(accounts) }),
+        // 🧩 splitting / 🔁 round trips; "large" means ฿300,000 or $10,000 together
+        patternRoles(traceLinks, { minTotal: cur.cur === 'THB' ? 300_000 : 10_000, name: (p) => displayName(p, book, shortAddress).text }),
+      ),
+    [traceLinks, book, accounts, cur.cur],
+  );
+  const categorized = useMemo(() => categorize(txns, aliases, overrides), [txns, aliases, overrides]);
+  const dateBounds = useMemo(() => {
+    const ds = txns.map((t) => t.date).sort();
+    return { min: ds[0] ?? '', max: ds[ds.length - 1] ?? '' };
+  }, [txns]);
+
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    keepCurrency.current = false;
+    const all = [...files];
+    const csvs = all.filter((f) => /\.(csv|txt|tsv)$/i.test(f.name) || f.type.includes('csv'));
+    const pdfs = all.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    const texts = await Promise.all(csvs.map(async (f) => ({ name: f.name, text: await f.text() })));
+    preferBahtFor(texts.map((x) => x.text).join('\n'));
+    // address books (address,name,type) go straight into the book; everything else to the import step
+    const books = texts.filter((f) => isAddressBookCsv(f.text));
+    const checks: FileCheck[] = [];
+    const csvRows = (text: string) => Papa.parse<string[]>(text, { skipEmptyLines: 'greedy' }).data.slice(0, 20000);
+    // CSV: statement rows → import; simulation input → forecast; names → address book; reports explained
+    const read: PendingFile[] = [];
+    for (const f of texts) {
+      if (isAddressBookCsv(f.text)) {
+        checks.push({ file: f.name, kind: 'addressBook', ok: true, names: Object.keys(parseAddressBook(f.text)).length });
+      } else if (isSimulationCsv(f.text)) {
+        setSim({ input: parseSimulationCsv(f.text), name: f.name });
+        setView('forecast');
+        checks.push({ file: f.name, kind: 'simulation', ok: true });
+      } else {
+        const rows = csvRows(f.text);
+        if (looksLikeTransactions(rows)) {
+          read.push(f);
+          checks.push({ file: f.name, kind: 'statement', ok: true, rows: countTxRows(rows), reconciles: null });
+        } else checks.push({ file: f.name, kind: whyNotTransactions(f.text), ok: false });
+      }
+    }
+    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
+    if (pdfs.length) {
+      setStatus(t('readingPdf', { n: pdfs.length }));
+      const { pdfToLines } = await import('./lib/pdfText');
+      for (const f of pdfs) {
+        try {
+          const buf = await f.arrayBuffer();
+          // pdf.js may take ownership of the buffer: give each reader its own copy
+          const lines = await pdfToLines(buf.slice(0));
+          let pdf = doorDashStatement(lines) ?? parseStatementLines(lines);
+          let ocr = false;
+          // almost no text = the pages are pictures (a scan): read them with OCR
+          if (!pdf.parsed.rows.length && lines.join('').replace(/\s/g, '').length < 200) {
+            const { ocrPdfToLines } = await import('./lib/pdfOcr');
+            const ocrLines = await ocrPdfToLines(buf.slice(0), ({ page, pages, part }) =>
+              setStatus(t('ocrProgress', { f: f.name, p: page, n: pages, pct: Math.round(part * 100) })),
+            );
+            pdf = parseStatementLines(ocrLines);
+            ocr = true;
+          }
+          if (pdf.parsed.rows.length) {
+            preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
+            read.push({ name: f.name, text: '', pdf, ...(ocr ? { ocr } : {}) });
+            checks.push(
+              pdf.doordash
+                ? { file: f.name, kind: 'doordash', ok: true, payouts: pdf.doordash.payouts, reconciles: reconciles(pdf) }
+                : { file: f.name, kind: ocr ? 'scan' : 'statementPdf', ok: true, rows: pdf.parsed.rows.length, reconciles: reconciles(pdf) },
+            );
+          } else checks.push({ file: f.name, kind: ocr ? 'scanUnreadable' : whyNotTransactions(lines.join('\n')), ok: false });
+        } catch (e) {
+          checks.push({ file: f.name, kind: 'error', ok: false, error: e instanceof Error ? e.message : 'error' });
+        }
+      }
+    }
+    // Excel / LibreOffice / Word files and photos of statements
+    const docs = all.filter((f) => docKind(f.name, f.type));
+    for (const f of docs) {
+      const kind = docKind(f.name, f.type)!;
+      try {
+        if (kind === 'oldOffice') {
+          checks.push({ file: f.name, kind: 'oldOffice', ok: false });
+          continue;
+        }
+        if (kind === 'image') {
+          const { ocrImageToLines } = await import('./lib/pdfOcr');
+          const lines = await ocrImageToLines(f, ({ part }) => setStatus(t('ocrProgress', { f: f.name, p: 1, n: 1, pct: Math.round(part * 100) })));
+          const pdf = parseStatementLines(lines);
+          if (pdf.parsed.rows.length) {
+            preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
+            read.push({ name: f.name, text: '', pdf, ocr: true });
+            checks.push({ file: f.name, kind: 'scan', ok: true, rows: pdf.parsed.rows.length, reconciles: reconciles(pdf) });
+          } else checks.push({ file: f.name, kind: 'scanUnreadable', ok: false });
+          continue;
+        }
+        setStatus(t('readingDoc', { f: f.name }));
+        const data = new Uint8Array(await f.arrayBuffer());
+        let tables: Sheet[] = [];
+        let lines: string[] = [];
+        if (kind === 'xlsx') tables = readXlsx(data);
+        else if (kind === 'ods') tables = readOds(data);
+        else ({ tables, lines } = readDocx(data));
+        const used: string[] = [];
+        const skipped: string[] = [];
+        let rowsFound = 0;
+        let names = 0;
+        for (const sh of tables) {
+          const text = toCsv(sh.rows);
+          const label = tables.length > 1 || kind === 'docx' ? `${f.name} › ${sh.name}` : f.name;
+          if (isAddressBookCsv(text)) {
+            const b = parseAddressBook(text);
+            addToBook(b);
+            names += Object.keys(b).length;
+            used.push(sh.name);
+          } else if (isSimulationCsv(text)) {
+            setSim({ input: parseSimulationCsv(text), name: label });
+            setView('forecast');
+                checks.push({ file: label, kind: 'simulation', ok: true });
+            used.push(sh.name);
+          } else if (looksLikeTransactions(sh.rows)) {
+            preferBahtFor(text);
+            read.push({ name: label, text });
+            rowsFound += countTxRows(sh.rows);
+            used.push(sh.name);
+          } else if (sh.rows.length) skipped.push(sh.name);
+        }
+        // a Word file whose statement is written as text lines, not a table
+        if (!used.length && lines.length) {
+          const pdf = parseStatementLines(lines);
+          if (pdf.parsed.rows.length) {
+            read.push({ name: f.name, text: '', pdf });
+            rowsFound += pdf.parsed.rows.length;
+            used.push('text');
+          }
+        }
+        const allText = [...tables.map((x) => toCsv(x.rows)), ...lines].join('\n');
+        if (rowsFound || names)
+          checks.push({ file: f.name, kind: names && !rowsFound ? 'addressBook' : 'statement', ok: true, rows: rowsFound, names, sheets: used, skipped, reconciles: null });
+        else if (!used.length) checks.push({ file: f.name, kind: whyNotTransactions(allText), ok: false, skipped });
+      } catch (e) {
+        checks.push({ file: f.name, kind: 'error', ok: false, error: e instanceof Error ? e.message : 'error' });
+      }
+    }
+    const known = new Set([...csvs, ...pdfs, ...docs]);
+    for (const f of all) if (!known.has(f)) checks.push({ file: f.name, kind: 'unsupported', ok: false });
+    // oldest statement first so the account name from the first one is reused for the rest
+    read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
+    if (read.length) setQueue((q) => [...q, ...read]);
+    setFileChecks(checks);
+    setStatus('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t]);
+
+  /** Thai text in a file → show baht (before the import window opens), unless the user chose a currency. */
+  function preferBahtFor(text: string) {
+    if (keepCurrency.current) return;
+    if (/[\u0E00-\u0E7F]/.test(text)) setCur((c) => (c.manual || c.cur === 'THB' ? c : { cur: 'THB', manual: false }));
+  }
+
+  const addToBook = (labels: AddressBook) => {
+    const n = Object.keys(labels).length;
+    if (!n) return;
+    setBook((b) => ({ ...b, ...labels }));
+    setStatus(t('toastBook', { n }));
+  };
+
+  /** Jump to a dot by (part of) its address or name — paste an address from Etherscan. */
+  const findInGraph = () => {
+    const q = findQ.trim().toLowerCase();
+    if (!q) return;
+    const hit =
+      graph.nodes.find((n) => n.id.replace(/^(cp|acct):/, '').toLowerCase() === q || n.label.toLowerCase() === q || book[bookKey(n.id.replace(/^(cp|acct):/, ''))]?.name.toLowerCase() === q) ??
+      graph.nodes.find((n) => n.id.toLowerCase().includes(q) || n.label.toLowerCase().includes(q) || (book[bookKey(n.id.replace(/^(cp|acct):/, ''))]?.name.toLowerCase().includes(q) ?? false));
+    if (hit) {
+      setSelection({ kind: 'node', id: hit.id });
+      setStatus('');
+    } else setStatus(t('findNone', { q: findQ.trim() }));
+  };
+
+  const setLabel = (party: string, label: Label | null) => {
+    setBook((b) => {
+      const next = { ...b };
+      if (label) next[bookKey(party)] = label;
+      else delete next[bookKey(party)];
+      return next;
+    });
+    setStatus(label ? t('toastLabel', { name: label.name }) : t('toastLabelRemoved'));
+    setUndo(null);
+  };
+
+  const loadSamples = async (set: 'us' | 'th' | 'th2' = 'us') => {
+    const files = set === 'th' ? thaiSampleFiles : set === 'th2' ? caseBFiles : sampleFiles;
+    keepCurrency.current = set === 'us';
+    const entries: PendingFile[] = await Promise.all(
+      Object.entries(files).map(async ([path, load]) => ({ name: path.split('/').pop()!, text: (await load()) as string })),
+    );
+    preferBahtFor(entries.map((e) => e.text).join('\n'));
+    if (set === 'th') for (const e of entries) if (e.name === 'foundation-A-bank.csv') e.account = 'มูลนิธิ A (สมมติ)';
+    if (set === 'th2') for (const e of entries) if (e.name === 'personal-account-B.csv') e.account = 'บัญชีส่วนตัว ผู้ก่อตั้ง บี (สมมติ)';
+    const books = entries.filter((e) => isAddressBookCsv(e.text));
+    if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
+    setQueue((q) => [...q, ...entries.filter((e) => !isAddressBookCsv(e.text))]);
+  };
+
+  const finishImport = (newTx: Transaction[], newLinks: Transaction[], profile: BankProfile | null, tags?: Record<string, string>) => {
+    const file = queue[0];
+    // Thai statements → show baht, unless the user picked a currency themselves
+    if (!keepCurrency.current && !cur.manual && cur.cur !== 'THB' && [...newTx, ...newLinks].some((x) => /[\u0E00-\u0E7F]/.test(x.description) && !x.unit)) {
+      setCur({ cur: 'THB', manual: false });
+    }
+    // name tags inside explorer exports fill the address book, without overwriting names you set
+    if (tags) setBook((b) => ({ ...labelsFromTags(tags), ...b }));
+    const linkIds = new Set(links.map((l) => l.id));
+    const freshLinks = newLinks.filter((l) => !linkIds.has(l.id));
+    if (freshLinks.length) setLinks((cur) => [...cur, ...freshLinks]);
+    // a file with only other people's flows has nothing for the summary: open the graph
+    if (!newTx.length && freshLinks.length && !txns.length) setView('graph');
+    setTxns((cur) => {
+      const ids = new Set(cur.map((t) => t.id));
+      const fresh = newTx.filter((t) => !ids.has(t.id));
+      const skipped = newTx.length - fresh.length + (newLinks.length - freshLinks.length);
+      setStatus(t('imported', { n: fresh.length + freshLinks.length, f: file.name }) + (skipped ? t('alreadyLoaded', { n: skipped }) : ''));
+      setUndo(null);
+      return [...cur, ...fresh];
+    });
+    const info = file.pdf?.info;
+    if (info?.periodStart && info.periodEnd) {
+      setStmtRange((r) => ({
+        from: !r.from || info.periodStart! < r.from ? info.periodStart! : r.from,
+        to: !r.to || info.periodEnd! > r.to ? info.periodEnd! : r.to,
+      }));
+      // statement cycles (e.g. Chase: 24th → 23rd): follow them unless the user chose a day
+      const day = Number(info.periodStart.slice(8, 10));
+      setCycle((c) => (c.manual || day < 1 || day > 28 ? c : { day, manual: false }));
+    }
+    if (profile) setProfiles((ps) => [...ps.filter((p) => p.signature !== profile.signature && p.name !== profile.name), profile]);
+    setQueue((q) => q.slice(1));
+  };
+
+  // main category of every current name (used to warn before risky merges)
+  const nameCategory = useMemo(() => {
+    const votes = new Map<string, Map<string, number>>();
+    for (const t of categorized) {
+      const v = votes.get(t.name) ?? votes.set(t.name, new Map()).get(t.name)!;
+      v.set(t.category, (v.get(t.category) ?? 0) + Math.abs(t.amount));
+    }
+    const out = new Map<string, string>();
+    for (const [n, v] of votes) out.set(n, [...v.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+    return out;
+  }, [categorized]);
+
+  const changeNames = (next: Aliases, msg: string) => {
+    setUndo({ msg, prev: aliases });
+    setAliases(next);
+    setStatus('');
+  };
+
+  /** Merge/rename one or more names into `to`. Returns false if the user cancelled. */
+  const rename = (froms: string[], to: string): boolean => {
+    const target = to.trim();
+    const sources = froms.filter((f) => f !== target);
+    if (!target || !sources.length) return false;
+    const catName = (id: string | null) => (id ? `${categoryOf(id).icon} ${lang === 'th' ? categoryOf(id).th : categoryOf(id).en}` : '');
+    const w = mergeWarning(sources, target, (n) => nameCategory.get(n) ?? null, accounts);
+    if (w.kind === 'crossCategory') {
+      const list = w.items.map((i) => `• ${i.name} (${catName(i.category)})`).join('\n');
+      if (!confirm(t('mergeConfirmCross', { list, to: target, toCat: w.targetCategory ? ` (${catName(w.targetCategory)})` : '' }))) return false;
+    } else if (w.kind === 'toAccount') {
+      if (!confirm(t('mergeConfirmAccount', { list: w.names.join(', '), to: target }))) return false;
+    }
+    const kind = mergeKind(target, new Set(nameCategory.keys()), accounts);
+    const raw = new Set([...txns.map((x) => x.counterparty), ...links.flatMap((l) => (l.link ? [l.link.from, l.link.to] : []))]);
+    const next = sources.reduce((a, f) => renameCounterparty(a, raw, f, target), aliases);
+    const from = sources.join(', ');
+    changeNames(next, t(kind === 'merge' ? 'toastMerged' : kind === 'account' ? 'toastAccount' : 'toastRenamed', { from, to: target }));
+    return true;
+  };
+
+  const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  const exportPng = () => {
+    const blob = graphRef.current?.png();
+    if (blob) download(`money-flow-${stamp}.png`, blob);
+  };
+
+  const clearAll = () => {
+    if (!confirm(t('confirmClear'))) return;
+    setTxns([]);
+    setLinks([]);
+    setSim(null);
+    setTrail(null);
+    setSelection(null);
+    setFilters(DEFAULT_FILTERS);
+    setStmtRange({});
+    setStatus('');
+  };
+
+  const resetNames = () => {
+    if (confirm(t('confirmResetNames'))) changeNames({}, t('toastNamesReset'));
+  };
+
+  return (
+    <div
+      className={`app ${dragging ? 'dragging' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void addFiles(e.dataTransfer.files);
+      }}
+    >
+      <header className="topbar">
+        <h1>Money Flow</h1>
+        <button className="primary" onClick={() => fileInput.current?.click()}>
+          {t('addFile')}
+        </button>
+        <button onClick={() => setShowHelp(true)}>❓ {t('help')}</button>
+        <button
+          className="lang"
+          title={t('currencyTitle')}
+          onClick={() => setCur({ cur: cur.cur === 'THB' ? 'USD' : 'THB', manual: true })}
+        >
+          {cur.cur === 'THB' ? '฿ บาท' : '$ USD'}
+        </button>
+        <button className="lang" onClick={() => setLang(lang === 'th' ? 'en' : 'th')} title="ภาษา / Language">
+          🌐 {t('lang')}
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".csv,.tsv,.txt,.pdf,.xlsx,.xlsm,.ods,.docx,.xls,.doc,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void addFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        {hasData && (
+          <>
+            <span className="muted small">
+              {t('stats', { t: txns.length + links.length, a: accounts.length, n: graph.nodes.length })}
+            </span>
+            <span className="spacer" />
+            {view === 'graph' && (
+              <>
+                <button onClick={() => graphRef.current?.fit()}>{t('fit')}</button>
+                <button onClick={() => graphRef.current?.relayout()}>{t('relayout')}</button>
+                <button onClick={exportPng}>{t('png')}</button>
+              </>
+            )}
+            <button onClick={() => download(`money-flow-summary-${stamp}.csv`, summaryCsv(filtered, aliases))}>{t('summaryCsv')}</button>
+            <button onClick={() => download(`money-flow-transactions-${stamp}.csv`, transactionsCsv(filtered, aliases))}>{t('txnsCsv')}</button>
+            <button onClick={resetNames} title={t('resetNamesTitle')}>
+              {t('resetNames')}
+            </button>
+            <button className="danger" onClick={clearAll}>
+              {t('clear')}
+            </button>
+          </>
+        )}
+      </header>
+
+      {(hasData || sim) && (
+        <nav className="views">
+          {hasData && (
+            <>
+              <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
+                {t('viewSummary')}
+              </button>
+              <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
+                {t('viewGraph')}
+              </button>
+            </>
+          )}
+          {sim && (
+            <button className={view === 'forecast' ? 'active' : ''} onClick={() => setView('forecast')}>
+              {t('viewForecast')}
+            </button>
+          )}
+        </nav>
+      )}
+
+      {hasData && view === 'graph' && (
+        <div className="filters">
+          <label>
+            {t('from')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />
+          </label>
+          <label>
+            {t('to')} <input type="date" min={dateBounds.min} max={dateBounds.max} value={filters.to ?? ''} onChange={(e) => set({ to: e.target.value || undefined })} />
+          </label>
+          <label>
+            <span title={t('minAmtTitle')}>{t('minAmt')}</span> <input type="number" min={0} step={10} value={filters.minAmount || ''} placeholder="0" onChange={(e) => set({ minAmount: Number(e.target.value) || 0 })} />
+          </label>
+          <label>
+            {t('flow')}
+            <select value={filters.direction} onChange={(e) => set({ direction: e.target.value as Filters['direction'] })}>
+              <option value="all">{t('flowAll')}</option>
+              <option value="in">{t('flowIn')}</option>
+              <option value="out">{t('flowOut')}</option>
+            </select>
+          </label>
+          <label title={t('topNTitle')}>
+            {t('topN')} <input type="number" min={0} step={5} value={filters.topN} onChange={(e) => set({ topN: Math.max(0, Number(e.target.value) || 0) })} />
+          </label>
+          <input
+            id="graph-find"
+            className="graph-find"
+            list="graph-find-list"
+            placeholder={t('findPh')}
+            value={findQ}
+            onChange={(e) => setFindQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && findInGraph()}
+          />
+          <datalist id="graph-find-list">
+            {graph.nodes
+              .filter((n) => n.kind !== 'other')
+              .slice(0, 300)
+              .map((n) => {
+                const p = n.id.replace(/^(cp|acct):/, '');
+                const l = book[bookKey(p)];
+                return <option key={n.id} value={l ? l.name : n.label} />;
+              })}
+          </datalist>
+          <span className="acct-chips">
+            {accounts.map((a) => {
+              const on = filters.accounts.length === 0 || filters.accounts.includes(a);
+              return (
+                <button
+                  key={a}
+                  className={`chip ${on ? 'on' : ''}`}
+                  onClick={() => {
+                    const cur = filters.accounts.length ? filters.accounts : accounts;
+                    const next = on ? cur.filter((x) => x !== a) : [...cur, a];
+                    set({ accounts: next.length === accounts.length ? [] : next });
+                  }}
+                >
+                  {a}
+                </button>
+              );
+            })}
+          </span>
+          {(filters.from || filters.to || filters.minAmount || filters.direction !== 'all' || filters.accounts.length > 0) && (
+            <button className="link" onClick={() => setFilters({ ...DEFAULT_FILTERS, topN: filters.topN })}>
+              {t('resetFilters')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {undo && (
+        <div className="status undo-bar" role="status">
+          <span>✓ {undo.msg}</span>
+          <button
+            className="undo-btn"
+            onClick={() => {
+              setAliases(undo.prev);
+              setUndo(null);
+              setStatus(t('undone'));
+            }}
+          >
+            ↶ {t('undo')}
+          </button>
+          <button className="link small" aria-label={t('close')} onClick={() => setUndo(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+      {fileChecks.length > 0 && <FileCheckCard checks={fileChecks} onClose={() => setFileChecks([])} />}
+      {status && !undo && (
+        <div className="status" onClick={() => setStatus('')}>
+          {status}
+        </div>
+      )}
+
+      {sim && (view === 'forecast' || !hasData) ? (
+        <main className="summary-main">
+          <ForecastView
+            input={sim.input}
+            fileName={sim.name}
+            onClose={() => {
+              setSim(null);
+              setView('summary');
+            }}
+          />
+        </main>
+      ) : !hasData ? (
+        <main className="empty">
+          <div className="empty-card">
+            <h2>{t('emptyTitle')}</h2>
+            <p>{t('emptyBody')}</p>
+            <div className="empty-actions">
+              <button className="primary" onClick={() => fileInput.current?.click()}>
+                {t('addFile')}
+              </button>
+              <button onClick={() => setShowHelp(true)}>📖 {t('openHelp')}</button>
+              <button onClick={() => loadSamples('us')}>{t('trySamples')}</button>
+              <button onClick={() => loadSamples('th')}>🐾 {t('trySamplesTh')}</button>
+              <button onClick={() => loadSamples('th2')}>🧩 {t('trySamplesTh2')}</button>
+            </div>
+            <ul>
+              <li>{t('empty1')}</li>
+              <li>{t('empty2')}</li>
+              <li>{t('empty3')}</li>
+            </ul>
+          </div>
+        </main>
+      ) : view === 'summary' ? (
+        <main className="summary-main">
+          <SummaryView
+            txns={categorized}
+            aliases={aliases}
+            overrides={overrides}
+            onOverride={(name, id) =>
+              setOverrides((o) => {
+                const next = { ...o };
+                if (id) next[name] = id;
+                else delete next[name];
+                return next;
+              })
+            }
+            onResetOverrides={() => setOverrides({})}
+            cycleDay={cycle.day}
+            cycleAuto={!cycle.manual}
+            onCycleDay={(day) => setCycle({ day, manual: true })}
+            dataFrom={stmtRange.from}
+            dataTo={stmtRange.to}
+            budgets={budgets}
+            onBudget={(id, amount) =>
+              setBudgets((b) => {
+                const next = { ...b };
+                if (amount && amount > 0) next[id] = amount;
+                else delete next[id];
+                return next;
+              })
+            }
+            goal={goal}
+            onGoal={setGoal}
+          />
+        </main>
+      ) : (
+        <main className="workspace">
+          <GraphView ref={graphRef} graph={graph} selected={selection} onSelect={setSelection} book={book} roles={roles} trail={trail} />
+          <SidePanel
+            txns={filtered}
+            links={links}
+            traceLinks={traceLinks}
+            book={book}
+            roles={roles}
+            onLabel={setLabel}
+            onTrace={setTrail}
+            onBookReplace={(b) => setBook(b)}
+            aliases={aliases}
+            graph={graph}
+            accounts={accounts}
+            selection={selection}
+            onSelect={setSelection}
+            onRename={rename}
+            onUnmerge={(r) => changeNames(unmerge(aliases, r), t('toastUnmerged', { name: r }))}
+          />
+          <div className="legend">
+            <span>
+              <i className="sw acct" /> {t('legAcct')}
+            </span>
+            <span>
+              <i className="sw in" /> {t('legIn')}
+            </span>
+            <span>
+              <i className="sw out" /> {t('legOut')}
+            </span>
+            <span>
+              <i className="sw xfer" /> {t('legXfer')}
+            </span>
+            <span>
+              <i className="sw others" /> {t('legOthers')}
+            </span>
+            <span>
+              <i className="sw mixer" /> {t('legMixer')}
+            </span>
+            <span className="muted">{t('legEdge')}</span>
+          </div>
+        </main>
+      )}
+
+      {queue.length > 0 && (
+        <ImportDialog
+          key={`${queue[0].name}-${queue.length}`}
+          file={queue[0]}
+          remaining={queue.length - 1}
+          profiles={profiles}
+          accounts={accounts}
+          onImport={finishImport}
+          onSkip={() => setQueue((q) => q.slice(1))}
+        />
+      )}
+      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
+    </div>
+  );
+}
