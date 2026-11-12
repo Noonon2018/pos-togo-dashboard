@@ -291,3 +291,13 @@ tr.clickable:hover { background: #f9fafb; }
 .fc-neg td { background: #fef2f2; }
 .nowrap { white-space: nowrap; }
 @media (max-width: 860px) { .fc-cards, .fc-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* file check card */
+.filecheck { margin: 10px 16px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; display: grid; gap: 6px; max-height: 45vh; overflow: auto; }
+.filecheck-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.filecheck ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.filecheck li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 6px 8px; border-radius: 8px; }
+.filecheck li.ok { background: #f0fdf4; }
+.filecheck li.bad { background: #fef2f2; }
+.filecheck-body { min-width: 0; display: grid; gap: 2px; }
+.filecheck-name { overflow-wrap: anywhere; }

@@ -212,13 +212,19 @@ function trim(rows: string[][]): string[][] {
  * Is this table a list of transactions (one row = one movement of money)? At least 3 rows that hold
  * a date and an amount. A summary report (totals, statuses, notes) is not.
  */
+/** One row = one movement of money: a date and an amount. */
+export function isTxRow(r: string[]): boolean {
+  const hasDate = r.some((v) => v.length <= 30 && !!parseDate(v));
+  return hasDate && r.some((v) => v.length <= 20 && /\d/.test(v) && !parseDate(v) && Number.isFinite(parseAmount(v)));
+}
+
+export function countTxRows(rows: string[][]): number {
+  return rows.filter(isTxRow).length;
+}
+
 export function looksLikeTransactions(rows: string[][]): boolean {
   let hits = 0;
-  for (const r of rows) {
-    const hasDate = r.some((v) => v.length <= 30 && !!parseDate(v));
-    const hasAmount = r.some((v) => v.length <= 20 && /\d/.test(v) && !parseDate(v) && Number.isFinite(parseAmount(v)));
-    if (hasDate && hasAmount && ++hits >= 3) return true;
-  }
+  for (const r of rows) if (isTxRow(r) && ++hits >= 3) return true;
   return false;
 }
 

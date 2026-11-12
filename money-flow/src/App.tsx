@@ -16,8 +16,10 @@ import { parseStatementLines } from './lib/pdfStatement';
 import { doorDashStatement } from './lib/doordash';
 import Papa from 'papaparse';
 import ForecastView from './components/ForecastView';
+import FileCheckCard from './components/FileCheckCard';
+import { reconciles, whyNotTransactions, type FileCheck } from './lib/fileCheck';
 import { isSimulationCsv, parseSimulationCsv, type SimInput } from './lib/forecast';
-import { docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
+import { countTxRows, docKind, looksLikeTransactions, readDocx, readOds, readXlsx, toCsv, type Sheet } from './lib/officeFiles';
 import { download, summaryCsv, transactionsCsv } from './lib/exportCsv';
 import { renameCounterparty, unmerge } from './lib/rename';
 import {
@@ -62,6 +64,8 @@ export default function App() {
   const [view, setView] = useState<'summary' | 'graph' | 'forecast'>('summary');
   /** a "simulation input" file (cash, sales, bills) for the cash forecast; kept in memory only */
   const [sim, setSim] = useState<{ input: SimInput; name: string } | null>(null);
+  /** result of the last files dropped: what each one is and whether it can be used */
+  const [fileChecks, setFileChecks] = useState<FileCheck[]>([]);
   const [overrides, setOverrides] = useState(loadCategoryOverrides);
   const [budgets, setBudgets] = useState(loadBudgets);
   const [goal, setGoal] = useState(loadGoal);
@@ -129,21 +133,25 @@ export default function App() {
     preferBahtFor(texts.map((x) => x.text).join('\n'));
     // address books (address,name,type) go straight into the book; everything else to the import step
     const books = texts.filter((f) => isAddressBookCsv(f.text));
-    const problems: string[] = [];
-    let simLoaded = false;
-    // a summary report saved as CSV (totals, statuses, notes) has nothing to draw: say so instead of an empty import window
-    const read: PendingFile[] = texts.filter((f) => {
-      if (isAddressBookCsv(f.text)) return false;
-      if (isSimulationCsv(f.text)) {
+    const checks: FileCheck[] = [];
+    const csvRows = (text: string) => Papa.parse<string[]>(text, { skipEmptyLines: 'greedy' }).data.slice(0, 20000);
+    // CSV: statement rows → import; simulation input → forecast; names → address book; reports explained
+    const read: PendingFile[] = [];
+    for (const f of texts) {
+      if (isAddressBookCsv(f.text)) {
+        checks.push({ file: f.name, kind: 'addressBook', ok: true, names: Object.keys(parseAddressBook(f.text)).length });
+      } else if (isSimulationCsv(f.text)) {
         setSim({ input: parseSimulationCsv(f.text), name: f.name });
         setView('forecast');
-        simLoaded = true;
-        return false;
+        checks.push({ file: f.name, kind: 'simulation', ok: true });
+      } else {
+        const rows = csvRows(f.text);
+        if (looksLikeTransactions(rows)) {
+          read.push(f);
+          checks.push({ file: f.name, kind: 'statement', ok: true, rows: countTxRows(rows), reconciles: null });
+        } else checks.push({ file: f.name, kind: whyNotTransactions(f.text), ok: false });
       }
-      if (looksLikeTransactions(Papa.parse<string[]>(f.text, { skipEmptyLines: 'greedy' }).data.slice(0, 5000))) return true;
-      problems.push(t('docNoTx', { f: f.name }));
-      return false;
-    });
+    }
     if (books.length) addToBook(Object.assign({}, ...books.map((b) => parseAddressBook(b.text))));
     if (pdfs.length) {
       setStatus(t('readingPdf', { n: pdfs.length }));
@@ -167,10 +175,14 @@ export default function App() {
           if (pdf.parsed.rows.length) {
             preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
             read.push({ name: f.name, text: '', pdf, ...(ocr ? { ocr } : {}) });
-          }
-          else problems.push(t(ocr ? 'ocrNoTx' : 'pdfNoTx', { f: f.name }));
+            checks.push(
+              pdf.doordash
+                ? { file: f.name, kind: 'doordash', ok: true, payouts: pdf.doordash.payouts, reconciles: reconciles(pdf) }
+                : { file: f.name, kind: ocr ? 'scan' : 'statementPdf', ok: true, rows: pdf.parsed.rows.length, reconciles: reconciles(pdf) },
+            );
+          } else checks.push({ file: f.name, kind: ocr ? 'scanUnreadable' : whyNotTransactions(lines.join('\n')), ok: false });
         } catch (e) {
-          problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
+          checks.push({ file: f.name, kind: 'error', ok: false, error: e instanceof Error ? e.message : 'error' });
         }
       }
     }
@@ -180,7 +192,7 @@ export default function App() {
       const kind = docKind(f.name, f.type)!;
       try {
         if (kind === 'oldOffice') {
-          problems.push(t('oldOffice', { f: f.name }));
+          checks.push({ file: f.name, kind: 'oldOffice', ok: false });
           continue;
         }
         if (kind === 'image') {
@@ -190,7 +202,8 @@ export default function App() {
           if (pdf.parsed.rows.length) {
             preferBahtFor(pdf.parsed.rows.map((r) => r[1]).join('\n'));
             read.push({ name: f.name, text: '', pdf, ocr: true });
-          } else problems.push(t('ocrNoTx', { f: f.name }));
+            checks.push({ file: f.name, kind: 'scan', ok: true, rows: pdf.parsed.rows.length, reconciles: reconciles(pdf) });
+          } else checks.push({ file: f.name, kind: 'scanUnreadable', ok: false });
           continue;
         }
         setStatus(t('readingDoc', { f: f.name }));
@@ -200,43 +213,54 @@ export default function App() {
         if (kind === 'xlsx') tables = readXlsx(data);
         else if (kind === 'ods') tables = readOds(data);
         else ({ tables, lines } = readDocx(data));
-        let used = 0;
+        const used: string[] = [];
         const skipped: string[] = [];
+        let rowsFound = 0;
+        let names = 0;
         for (const sh of tables) {
           const text = toCsv(sh.rows);
           const label = tables.length > 1 || kind === 'docx' ? `${f.name} › ${sh.name}` : f.name;
           if (isAddressBookCsv(text)) {
-            addToBook(parseAddressBook(text));
-            used++;
+            const b = parseAddressBook(text);
+            addToBook(b);
+            names += Object.keys(b).length;
+            used.push(sh.name);
+          } else if (isSimulationCsv(text)) {
+            setSim({ input: parseSimulationCsv(text), name: label });
+            setView('forecast');
+                checks.push({ file: label, kind: 'simulation', ok: true });
+            used.push(sh.name);
           } else if (looksLikeTransactions(sh.rows)) {
             preferBahtFor(text);
             read.push({ name: label, text });
-            used++;
+            rowsFound += countTxRows(sh.rows);
+            used.push(sh.name);
           } else if (sh.rows.length) skipped.push(sh.name);
         }
         // a Word file whose statement is written as text lines, not a table
-        if (!used && lines.length) {
+        if (!used.length && lines.length) {
           const pdf = parseStatementLines(lines);
           if (pdf.parsed.rows.length) {
             read.push({ name: f.name, text: '', pdf });
-            used++;
+            rowsFound += pdf.parsed.rows.length;
+            used.push('text');
           }
         }
-        if (!used) problems.push(t('docNoTx', { f: f.name }));
-        else if (skipped.length) problems.push(t('docSkipped', { f: f.name, s: skipped.join(', ') }));
+        const allText = [...tables.map((x) => toCsv(x.rows)), ...lines].join('\n');
+        if (rowsFound || names)
+          checks.push({ file: f.name, kind: names && !rowsFound ? 'addressBook' : 'statement', ok: true, rows: rowsFound, names, sheets: used, skipped, reconciles: null });
+        else if (!used.length) checks.push({ file: f.name, kind: whyNotTransactions(allText), ok: false, skipped });
       } catch (e) {
-        problems.push(t('pdfError', { f: f.name, e: e instanceof Error ? e.message : 'error' }));
+        checks.push({ file: f.name, kind: 'error', ok: false, error: e instanceof Error ? e.message : 'error' });
       }
     }
     const known = new Set([...csvs, ...pdfs, ...docs]);
-    for (const f of all) if (!known.has(f)) problems.push(t('unsupportedFile', { f: f.name }));
+    for (const f of all) if (!known.has(f)) checks.push({ file: f.name, kind: 'unsupported', ok: false });
     // oldest statement first so the account name from the first one is reused for the rest
     read.sort((a, b) => (a.pdf?.info.periodStart ?? a.name).localeCompare(b.pdf?.info.periodStart ?? b.name));
     if (read.length) setQueue((q) => [...q, ...read]);
-    if (problems.length) setStatus(problems.join(' · '));
-    else if (!read.length && !books.length && !simLoaded) setStatus(t('unsupported'));
-    else if (simLoaded && !read.length) setStatus('');
-    else if (pdfs.length || docs.length) setStatus('');
+    setFileChecks(checks);
+    setStatus('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
@@ -562,6 +586,7 @@ export default function App() {
           </button>
         </div>
       )}
+      {fileChecks.length > 0 && <FileCheckCard checks={fileChecks} onClose={() => setFileChecks([])} />}
       {status && !undo && (
         <div className="status" onClick={() => setStatus('')}>
           {status}
