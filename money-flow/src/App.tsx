@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import GraphView, { type GraphHandle, type Selection } from './components/GraphView';
 import ImportDialog, { type PendingFile } from './components/ImportDialog';
 import SidePanel from './components/SidePanel';
@@ -49,6 +49,8 @@ const thaiSampleFiles = import.meta.glob('../samples/th/*.csv', { query: '?raw',
 // fictional case B: splitting, cash withdrawals, a round trip (all names invented)
 const caseBFiles = import.meta.glob('../samples/th-case2/*.csv', { query: '?raw', import: 'default' });
 
+const hasFiles = (e: ReactDragEvent) => [...e.dataTransfer.types].includes('Files');
+
 export default function App() {
   const [txns, setTxns] = useState<Transaction[]>([]);
   /** flows between other people from "from → to" files (graph only) */
@@ -60,6 +62,7 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [status, setStatus] = useState('');
   const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [showHelp, setShowHelp] = useState(false);
   const [view, setView] = useState<'summary' | 'graph' | 'forecast'>('summary');
   /** a "simulation input" file (cash, sales, bills) for the cash forecast; kept in memory only */
@@ -415,20 +418,35 @@ export default function App() {
 
   return (
     <div
-      className={`app ${dragging ? 'dragging' : ''}`}
-      onDragOver={(e) => {
-        e.preventDefault();
+      className="app"
+      // count enter/leave pairs so moving over child elements doesn't flicker or leave the overlay stuck;
+      // dragged text (not files) keeps its normal behaviour, e.g. dropping into the search box
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current += 1;
         setDragging(true);
       }}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault();
+      }}
       onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false);
+        if (!hasFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
       }}
       onDrop={(e) => {
+        if (!hasFiles(e)) return;
         e.preventDefault();
+        dragDepth.current = 0;
         setDragging(false);
-        void addFiles(e.dataTransfer.files);
+        if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files);
       }}
     >
+      {dragging && (
+        <div className="drop-overlay" aria-hidden="true">
+          {t('dropFiles')}
+        </div>
+      )}
       <header className="topbar">
         <h1>Money Flow</h1>
         <button className="primary" onClick={() => fileInput.current?.click()}>
@@ -485,16 +503,16 @@ export default function App() {
         <nav className="views">
           {hasData && (
             <>
-              <button className={view === 'summary' ? 'active' : ''} onClick={() => setView('summary')}>
+              <button className={view === 'summary' ? 'active' : ''} aria-current={view === 'summary' ? 'page' : undefined} onClick={() => setView('summary')}>
                 {t('viewSummary')}
               </button>
-              <button className={view === 'graph' ? 'active' : ''} onClick={() => setView('graph')}>
+              <button className={view === 'graph' ? 'active' : ''} aria-current={view === 'graph' ? 'page' : undefined} onClick={() => setView('graph')}>
                 {t('viewGraph')}
               </button>
             </>
           )}
           {sim && (
-            <button className={view === 'forecast' ? 'active' : ''} onClick={() => setView('forecast')}>
+            <button className={view === 'forecast' ? 'active' : ''} aria-current={view === 'forecast' ? 'page' : undefined} onClick={() => setView('forecast')}>
               {t('viewForecast')}
             </button>
           )}
@@ -526,6 +544,7 @@ export default function App() {
           <input
             id="graph-find"
             className="graph-find"
+            aria-label={t('findLabel')}
             list="graph-find-list"
             placeholder={t('findPh')}
             value={findQ}
@@ -549,6 +568,7 @@ export default function App() {
                 <button
                   key={a}
                   className={`chip ${on ? 'on' : ''}`}
+                  aria-pressed={on}
                   onClick={() => {
                     const cur = filters.accounts.length ? filters.accounts : accounts;
                     const next = on ? cur.filter((x) => x !== a) : [...cur, a];
@@ -568,8 +588,10 @@ export default function App() {
         </div>
       )}
 
+      {/* always mounted, so screen readers announce each new message (import done, OCR progress, undo) */}
+      <div role="status" aria-live="polite">
       {undo && (
-        <div className="status undo-bar" role="status">
+        <div className="status undo-bar">
           <span>✓ {undo.msg}</span>
           <button
             className="undo-btn"
@@ -586,12 +608,16 @@ export default function App() {
           </button>
         </div>
       )}
-      {fileChecks.length > 0 && <FileCheckCard checks={fileChecks} onClose={() => setFileChecks([])} />}
       {status && !undo && (
         <div className="status" onClick={() => setStatus('')}>
-          {status}
+          <span>{status}</span>
+          <button className="link small" aria-label={t('close')} onClick={() => setStatus('')}>
+            ✕
+          </button>
         </div>
       )}
+      </div>
+      {fileChecks.length > 0 && <FileCheckCard checks={fileChecks} onClose={() => setFileChecks([])} />}
 
       {sim && (view === 'forecast' || !hasData) ? (
         <main className="summary-main">

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export type Lang = 'th' | 'en';
 
@@ -329,6 +329,11 @@ const en = {
   insInvest: 'Sent {amt} to investing/crypto ({pct}% of income) — not counted as spending.',
   insTopCategory: 'Biggest category: {cat} {amt} ({pct}% of spending).',
   close: 'Close',
+  dropFiles: 'Drop files to add them — statements, spreadsheets, PDFs or photos',
+  unmergeName: 'Un-merge {name}',
+  findLabel: 'Find address or name',
+  sideTabs: 'Lists',
+  monthBar: '{m}: income {inc}, spending {sp}',
 };
 
 type Key = keyof typeof en;
@@ -660,6 +665,11 @@ const th: Record<Key, string> = {
   insInvest: 'ส่งเงินไปลงทุน/คริปโต {amt} ({pct}% ของรายรับ) — ไม่นับเป็นรายจ่าย',
   insTopCategory: 'หมวดที่จ่ายมากที่สุด: {cat} {amt} ({pct}% ของรายจ่าย)',
   close: 'ปิด',
+  dropFiles: 'วางไฟล์ที่นี่เพื่อเพิ่ม — statement, Excel, PDF หรือรูปถ่าย',
+  unmergeName: 'แยก {name} ออก',
+  findLabel: 'ค้นหา address หรือชื่อ',
+  sideTabs: 'รายการ',
+  monthBar: '{m}: รายรับ {inc}, รายจ่าย {sp}',
 };
 
 const DICTS: Record<Lang, Record<Key, string>> = { en, th };
@@ -691,6 +701,10 @@ export function LangProvider({ children }: { children: ReactNode }) {
       /* ignore */
     }
   }, []);
+  // screen readers pick their voice from <html lang>: keep it in step with the toggle
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
   return <Ctx.Provider value={{ lang, setLang }}>{children}</Ctx.Provider>;
 }
 

@@ -1,4 +1,5 @@
 import { useLang, useT } from '../i18n';
+import Modal from './Modal';
 
 const TH = [
   {
@@ -197,10 +198,9 @@ export default function HelpDialog({ onClose }: { onClose: () => void }) {
   const t = useT();
   const sections = lang === 'th' ? TH : EN;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal help" role="dialog" aria-label={t('help')} onClick={(e) => e.stopPropagation()}>
+    <Modal className="help" labelledBy="help-title" onDismiss={onClose}>
         <header className="modal-head">
-          <h2>{t('openHelp')}</h2>
+          <h2 id="help-title">{t('openHelp')}</h2>
           <button onClick={onClose}>{t('close')}</button>
         </header>
         <div className="help-body">
@@ -215,7 +215,6 @@ export default function HelpDialog({ onClose }: { onClose: () => void }) {
             </section>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

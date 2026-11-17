@@ -206,7 +206,7 @@ export default function ForecastView({ input, fileName, onClose }: { input: SimI
 
       <section className="card fc-chart-card">
         <h3>{L.chart}</h3>
-        <Chart runs={runs} pick={pick} dshort={dshort} labels={{ bad: L.bad, normal: L.normal, good: L.good }} />
+        <Chart runs={runs} pick={pick} dshort={dshort} labels={{ bad: L.bad, normal: L.normal, good: L.good, chart: L.chart }} />
       </section>
 
       <div className="fc-grid">
@@ -360,7 +360,7 @@ export default function ForecastView({ input, fileName, onClose }: { input: SimI
   );
 }
 
-function Chart({ runs, pick, dshort, labels }: { runs: Record<Scen, Run>; pick: Scen; dshort: (iso: string) => string; labels: Record<Scen, string> }) {
+function Chart({ runs, pick, dshort, labels }: { runs: Record<Scen, Run>; pick: Scen; dshort: (iso: string) => string; labels: Record<Scen | 'chart', string> }) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 900;
   const H = 300;
@@ -384,7 +384,7 @@ function Chart({ runs, pick, dshort, labels }: { runs: Record<Scen, Run>; pick: 
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="cash balance chart"
+        aria-label={labels.chart}
         onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => {
           const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect();

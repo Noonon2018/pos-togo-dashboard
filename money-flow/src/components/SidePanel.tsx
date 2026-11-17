@@ -46,6 +46,7 @@ interface Props {
 }
 
 type Tab = 'overview' | 'monthly' | 'recurring' | 'duplicates' | 'names';
+const TABS: Tab[] = ['overview', 'monthly', 'recurring', 'duplicates', 'names'];
 
 export default function SidePanel(props: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -64,14 +65,37 @@ export default function SidePanel(props: Props) {
         <Details {...props} selection={selection} />
       ) : (
         <>
-          <nav className="tabs">
-            {(['overview', 'monthly', 'recurring', 'duplicates', 'names'] as Tab[]).map((k) => (
-              <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+          <div className="tabs" role="tablist" aria-label={t('sideTabs')}>
+            {TABS.map((k) => (
+              <button
+                key={k}
+                id={`side-tab-${k}`}
+                role="tab"
+                aria-selected={tab === k}
+                aria-controls="side-tabpanel"
+                tabIndex={tab === k ? 0 : -1}
+                className={tab === k ? 'active' : ''}
+                onClick={() => setTab(k)}
+                onKeyDown={(e) => {
+                  // arrow keys move between tabs (one Tab stop for the whole row)
+                  const i = TABS.indexOf(k);
+                  const next =
+                    e.key === 'ArrowRight' ? TABS[(i + 1) % TABS.length]
+                    : e.key === 'ArrowLeft' ? TABS[(i - 1 + TABS.length) % TABS.length]
+                    : e.key === 'Home' ? TABS[0]
+                    : e.key === 'End' ? TABS[TABS.length - 1]
+                    : null;
+                  if (!next) return;
+                  e.preventDefault();
+                  setTab(next);
+                  document.getElementById(`side-tab-${next}`)?.focus();
+                }}
+              >
                 {tabLabel[k]}
               </button>
             ))}
-          </nav>
-          <div className="panel-body">
+          </div>
+          <div className="panel-body" id="side-tabpanel" role="tabpanel" aria-labelledby={`side-tab-${tab}`} tabIndex={0}>
             {tab === 'overview' && <Overview {...props} />}
             {tab === 'monthly' && <Monthly {...props} />}
             {tab === 'recurring' && <Recurring {...props} />}
@@ -115,11 +139,22 @@ function RedFlags({ roles, graph, book = {}, onSelect }: Props) {
         {items.map(({ party, r }) => {
           const id = nodeId(party);
           return (
-            <li key={`${party}-${r.id}`} className={`role ${r.id}${id ? ' clickable' : ''}`} onClick={() => id && onSelect({ kind: 'node', id })}>
-              <b>
-                {ROLE_ICON[r.id]} {displayName(party, book, shortAddress).text}
-              </b>
-              <span className="small">{roleWhy(r, tr)}</span>
+            <li key={`${party}-${r.id}`}>
+              {id ? (
+                <button type="button" className={`role ${r.id} clickable`} onClick={() => onSelect({ kind: 'node', id })}>
+                  <b>
+                    {ROLE_ICON[r.id]} {displayName(party, book, shortAddress).text}
+                  </b>
+                  <span className="small">{roleWhy(r, tr)}</span>
+                </button>
+              ) : (
+                <div className={`role ${r.id}`}>
+                  <b>
+                    {ROLE_ICON[r.id]} {displayName(party, book, shortAddress).text}
+                  </b>
+                  <span className="small">{roleWhy(r, tr)}</span>
+                </div>
+              )}
             </li>
           );
         })}
@@ -181,16 +216,18 @@ function BarList({ items, max, cls, onPick }: { items: { name: string; value: nu
   return (
     <ul className="bars">
       {items.map((i) => (
-        <li key={i.name} onClick={() => onPick(i.name)}>
-          <div className="bar-label">
-            <span>{i.name}</span>
-            <span className="num">
-              {money(i.value)} <span className="muted small">{i.sub}</span>
+        <li key={i.name}>
+          <button type="button" className="textbtn" onClick={() => onPick(i.name)}>
+            <span className="bar-label">
+              <span>{i.name}</span>
+              <span className="num">
+                {money(i.value)} <span className="muted small">{i.sub}</span>
+              </span>
             </span>
-          </div>
-          <div className="bar-track">
-            <div className={`bar ${cls}`} style={{ width: `${(100 * i.value) / max}%` }} />
-          </div>
+            <span className="bar-track">
+              <span className={`bar ${cls}`} style={{ width: `${(100 * i.value) / max}%` }} />
+            </span>
+          </button>
         </li>
       ))}
     </ul>
@@ -261,7 +298,10 @@ function Recurring({ txns, aliases, onSelect }: Props) {
         {list.map((r) => (
           <tr key={`${r.counterparty}|${r.account}`} className="clickable" onClick={() => onSelect(nodeOf(r.counterparty))}>
             <td>
-              {r.counterparty}
+              {/* the row is clickable with a mouse; this button is the keyboard way in */}
+              <button type="button" className="textbtn">
+                {r.counterparty}
+              </button>
               <div className="muted small">
                 {r.account} · {r.count}× · {t('next')} {r.nextExpected}{r.priceIncrease && <span className="warn">{t('priceUp', { v: money(r.lastAmount) })}</span>}
               </div>
@@ -377,9 +417,9 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect, book = 
                   checked={picked.includes(c.name)}
                   onChange={(e) => setPicked((p) => (e.target.checked ? [...p, c.name] : p.filter((x) => x !== c.name)))}
                 />
-                <span className="link" onClick={(e) => (e.preventDefault(), onSelect(nodeOf(c.name)))}>
+                <button type="button" className="textbtn link" onClick={() => onSelect(nodeOf(c.name))}>
                   {c.name}
-                </span>
+                </button>
               </label>
               <span className="num small">
                 {c.inflow > 0 && <span className="in">+{money(c.inflow)} </span>}
@@ -388,9 +428,9 @@ function Names({ txns, aliases, accounts, onRename, onUnmerge, onSelect, book = 
               {raws.length > 0 && (
                 <div className="raws">
                   {raws.map((r) => (
-                    <span key={r} className="chip" title={tr('unmergeTitle')} onClick={() => onUnmerge(r)}>
+                    <button type="button" key={r} className="chip" title={tr('unmergeTitle')} aria-label={tr('unmergeName', { name: r })} onClick={() => onUnmerge(r)}>
                       {r} ✕
-                    </span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -553,9 +593,9 @@ function Details({ txns, links = [], traceLinks = links, aliases, graph, account
               {raws
                 .filter((r) => r !== node.label)
                 .map((r) => (
-                  <span key={r} className="chip" title={tr('unmergeTitle')} onClick={() => onUnmerge(r)}>
+                  <button type="button" key={r} className="chip" title={tr('unmergeTitle')} aria-label={tr('unmergeName', { name: r })} onClick={() => onUnmerge(r)}>
                     {r} ✕
-                  </span>
+                  </button>
                 ))}
             </div>
           )}
@@ -570,13 +610,15 @@ function Details({ txns, links = [], traceLinks = links, aliases, graph, account
             const other = e.source === node.id ? e.target : e.source;
             const label = graph.nodes.find((n) => n.id === other)?.label ?? other;
             return (
-              <li key={e.id} onClick={() => onSelect({ kind: 'edge', id: e.id })}>
-                <span>
-                  {e.source === node.id ? '→' : '←'} {label}
-                </span>
-                <span className="num">
-                  {e.count} / {amountFmt(e.total, e.unit)}
-                </span>
+              <li key={e.id}>
+                <button type="button" className="textbtn" onClick={() => onSelect({ kind: 'edge', id: e.id })}>
+                  <span>
+                    {e.source === node.id ? '→' : '←'} {label}
+                  </span>
+                  <span className="num">
+                    {e.count} / {amountFmt(e.total, e.unit)}
+                  </span>
+                </button>
               </li>
             );
           })}

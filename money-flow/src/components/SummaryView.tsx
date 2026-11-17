@@ -171,9 +171,18 @@ export default function SummaryView(props: Props) {
         ) : (
           <ul className="insights">
             {ins.map((i) => (
-              <li key={i.id} className={`ins ${i.level} ${i.focus ? 'clickable' : ''}`} onClick={() => focus(i)}>
-                <span className="ins-icon">{i.level === 'warn' ? '⚠️' : i.level === 'good' ? '✅' : 'ℹ️'}</span>
-                <span>{renderInsight(i)}</span>
+              <li key={i.id}>
+                {i.focus ? (
+                  <button type="button" className={`ins ${i.level} clickable`} onClick={() => focus(i)}>
+                    <span className="ins-icon">{i.level === 'warn' ? '⚠️' : i.level === 'good' ? '✅' : 'ℹ️'}</span>
+                    <span>{renderInsight(i)}</span>
+                  </button>
+                ) : (
+                  <div className={`ins ${i.level}`}>
+                    <span className="ins-icon">{i.level === 'warn' ? '⚠️' : i.level === 'good' ? '✅' : 'ℹ️'}</span>
+                    <span>{renderInsight(i)}</span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -456,12 +465,27 @@ function TrendChart({
   const y = (v: number) => H - 20 - (v / max) * (H - 30);
   return (
     <>
-      <svg viewBox={`0 0 ${W} ${H}`} className="trend" role="img" aria-label={t('trendTitle')}>
+      {/* a group of month buttons (not role="img", which would hide them from screen readers) */}
+      <svg viewBox={`0 0 ${W} ${H}`} className="trend" role="group" aria-label={t('trendTitle')}>
         {rows.map((r, i) => {
           const x = i * slot + slot / 2;
           const inv = Math.max(0, r.invest);
           return (
-            <g key={r.month} onClick={() => onPick(r.month)} className={`trend-m ${selected === r.month ? 'sel' : ''}`}>
+            <g
+              key={r.month}
+              role="button"
+              tabIndex={0}
+              aria-pressed={selected === r.month}
+              aria-label={t('monthBar', { m: label(r.month), inc: money(r.income), sp: money(r.spending) })}
+              onClick={() => onPick(r.month)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onPick(r.month);
+                }
+              }}
+              className={`trend-m ${selected === r.month ? 'sel' : ''}`}
+            >
               <rect x={i * slot + 2} y={0} width={slot - 4} height={H} className="trend-bg" />
               <rect x={x - bw - 1} y={y(r.income)} width={bw} height={H - 20 - y(r.income)} fill="#16a34a">
                 <title>{`${t('kpiIncome')} ${money(r.income)}`}</title>

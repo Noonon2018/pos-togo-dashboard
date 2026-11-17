@@ -4,6 +4,7 @@ import type { StatementResult } from '../lib/pdfStatement';
 import type { BankProfile, ColumnMapping, Transaction } from '../lib/types';
 import { amountFmt, money } from '../format';
 import { useT } from '../i18n';
+import Modal from './Modal';
 
 export interface PendingFile {
   name: string;
@@ -122,11 +123,11 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal" role="dialog" aria-label="Map CSV columns">
+    // no onDismiss: Escape must not silently drop a file — "Skip this file" is the explicit way out
+    <Modal labelledBy="import-title">
         <header className="modal-head">
           <div>
-            <h2>{t('mapTitle')}</h2>
+            <h2 id="import-title">{t('mapTitle')}</h2>
             <div className="muted">
               {file.name}
               {remaining > 0 && t('moreFiles', { n: remaining })}
@@ -319,6 +320,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
           </label>
           <input
             className="profile-name"
+            aria-label={t('remember')}
             placeholder={t('profilePh')}
             value={profileName}
             disabled={!saveProfile}
@@ -331,8 +333,7 @@ export default function ImportDialog({ file, remaining, profiles, accounts, onIm
             {t('importN', { n: result.transactions.length + result.links.length })}
           </button>
         </footer>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
