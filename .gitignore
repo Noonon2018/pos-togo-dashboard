@@ -26,3 +26,6 @@ dist-ssr
 # Money-flow analyzer: real statements stay local
 money-flow/data/*
 !money-flow/data/.gitkeep
+
+# Impeccable audit reports
+.impeccable/
