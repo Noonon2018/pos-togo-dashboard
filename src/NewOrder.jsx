@@ -30,7 +30,7 @@ export default function NewOrder({ order, onBack }) {
   const [itemInput, setItemInput] = useState('');
   // Item autocomplete state
   // Fixed unit list as requested
-  const fixedUnitList = ["พาว", "ขวด", "ถุง", "ชิ้น", "อัน", "ก้อง", "แถว", "กระป๋อง"];
+  const fixedUnitList = ["ลัง", "พาว", "ขวด", "ถุง", "ชิ้น", "อัน", "ก้อง", "แถว", "กระป๋อง"];
   const [itemList, setItemList] = useState(fixedUnitList);
   // Remember last used qty for each item
   const [itemQtyMap, setItemQtyMap] = useState(() => {
@@ -266,7 +266,6 @@ export default function NewOrder({ order, onBack }) {
     /* Style calendar icon for date input */
     .neworder-main input[type="date"]::-webkit-calendar-picker-indicator {
       filter: invert(32%) sepia(99%) saturate(1812%) hue-rotate(191deg) brightness(95%) contrast(101%);
-      /* This filter makes the icon blue (#1976d2) */
     }
     .neworder-main input[type="date"]::-moz-calendar-picker-indicator {
       filter: invert(32%) sepia(99%) saturate(1812%) hue-rotate(191deg) brightness(95%) contrast(101%);
@@ -277,6 +276,8 @@ export default function NewOrder({ order, onBack }) {
     .neworder-main input[type="date"]::-ms-calendar-picker-indicator {
       filter: invert(32%) sepia(99%) saturate(1812%) hue-rotate(191deg) brightness(95%) contrast(101%);
     }
+
+    /* Default mobile (max 600px) */
     @media (max-width: 600px) {
       html, body {
         background: #fff !important;
@@ -326,6 +327,80 @@ export default function NewOrder({ order, onBack }) {
       .neworder-main > div > div[style*='margin-top: 8px'] select {
         width: 100% !important;
         min-width: 0 !important;
+      }
+    }
+
+    /* iPhone SE (375x667) */
+    @media (max-width: 380px) {
+      .neworder-main {
+        padding: 0 2vw 18px 2vw !important;
+        max-width: 98vw !important;
+        width: 98vw !important;
+      }
+      .neworder-main h1 {
+        font-size: 17px !important;
+      }
+      .neworder-main input,
+      .neworder-main select,
+      .neworder-main textarea {
+        font-size: 13px !important;
+      }
+    }
+
+    /* iPhone 12/13/14 (390x844) */
+    @media (max-width: 400px) {
+      .neworder-main {
+        padding: 0 3vw 18px 3vw !important;
+        max-width: 96vw !important;
+        width: 96vw !important;
+      }
+      .neworder-main h1 {
+        font-size: 18px !important;
+      }
+    }
+
+    /* Android 360px (e.g. Galaxy S8/S9/S10) */
+    @media (max-width: 370px) {
+      .neworder-main {
+        padding: 0 1vw 12px 1vw !important;
+        max-width: 99vw !important;
+        width: 99vw !important;
+      }
+      .neworder-main h1 {
+        font-size: 15px !important;
+      }
+    }
+
+    /* Android 411px (Pixel 2/3/4/5, Galaxy S20) */
+    @media (max-width: 415px) {
+      .neworder-main {
+        padding: 0 4vw 18px 4vw !important;
+        max-width: 94vw !important;
+        width: 94vw !important;
+      }
+    }
+
+    /* iPhone 14 Pro Max (430x932) */
+    @media (max-width: 440px) {
+      .neworder-main {
+        padding: 0 5vw 18px 5vw !important;
+        max-width: 92vw !important;
+        width: 92vw !important;
+      }
+      .neworder-main h1 {
+        font-size: 19px !important;
+      }
+    }
+
+    /* iPad Mini (768x1024) portrait */
+    @media (max-width: 800px) and (min-width: 601px) {
+      .neworder-main {
+        max-width: 98vw !important;
+        width: 98vw !important;
+        padding: 0 24px 32px 24px !important;
+      }
+      .neworder-main h1 {
+        font-size: 24px !important;
       }
     }
   `;
